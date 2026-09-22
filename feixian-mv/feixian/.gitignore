@@ -1,0 +1,8 @@
+library/
+temp/
+local/
+build/
+native/
+.creator/
+profiles/v2/packages/builder.json
+*.log

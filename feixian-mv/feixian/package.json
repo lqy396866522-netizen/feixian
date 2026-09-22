@@ -1,0 +1,9 @@
+{
+  "name": "feixian",
+  "uuid": "a7c3e9f1-2b4d-4e6a-8c1f-9d0e5b7a3c2e",
+  "creator": {
+    "version": "3.8.7"
+  },
+  "version": "3.8.7",
+  "description": "飞仙 MVP - WeChat mini-game local save idle combat"
+}

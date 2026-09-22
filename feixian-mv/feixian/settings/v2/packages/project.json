@@ -1,0 +1,14 @@
+{
+  "__version__": "1.0.6",
+  "general": {
+    "designResolution": {
+      "width": 720,
+      "height": 1280,
+      "fitWidth": false,
+      "fitHeight": true
+    },
+    "startScene": "c0ffee01-2345-4678-9abc-def012345601",
+    "defaultScene": "c0ffee01-2345-4678-9abc-def012345601"
+  },
+  "custom_joint_texture_layouts": []
+}

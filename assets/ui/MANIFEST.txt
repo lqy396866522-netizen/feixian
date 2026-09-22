@@ -1,0 +1,8 @@
+batch3 commercial GenerateImage assets
+feixian_char_hero.png 主角Q版立绘
+feixian_char_mob_bird.png 鸟怪
+feixian_fx_slash.png 斩击特效
+feixian_fx_drop.png 掉落特效
+feixian_icon_equip_*.png 装备六件
+feixian_icon_res_*.png 资源三件
+feixian_panel_breakthrough.png 突破弹层

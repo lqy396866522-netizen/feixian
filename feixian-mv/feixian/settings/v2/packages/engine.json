@@ -1,0 +1,19 @@
+{
+  "__version__": "1.0.12",
+  "modules": {
+    "graphics": true,
+    "ui": true,
+    "2d": true,
+    "3d": false,
+    "animation": true,
+    "audio": true,
+    "particle": false,
+    "physics": false,
+    "physics-2d": false,
+    "tween": true
+  },
+  "macroConfig": {
+    "ENABLE_TRANSPARENT_CANVAS": true,
+    "ENABLE_WEBGL_ANTIALIAS": true
+  }
+}

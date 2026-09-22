@@ -1,0 +1,12 @@
+[21208:0922/235218.628:ERROR:cache_util_win.cc(20)] Unable to move the cache: 拒绝访问。 (0x5)
+[21208:0922/235218.628:ERROR:cache_util_win.cc(20)] Unable to move the cache: 拒绝访问。 (0x5)
+[21208:0922/235218.628:ERROR:cache_util_win.cc(20)] Unable to move the cache: 拒绝访问。 (0x5)
+[21208:0922/235218.639:ERROR:disk_cache.cc(208)] Unable to create cache
+[21208:0922/235218.700:ERROR:gpu_disk_cache.cc(711)] Gpu Cache Creation failed: -2
+[21208:0922/235218.725:ERROR:disk_cache.cc(208)] Unable to create cache
+[21208:0922/235218.742:ERROR:gpu_disk_cache.cc(711)] Gpu Cache Creation failed: -2
+[21208:0922/235218.742:ERROR:disk_cache.cc(208)] Unable to create cache
+[21208:0922/235218.743:ERROR:gpu_disk_cache.cc(711)] Gpu Cache Creation failed: -2
+构建参数 mainBundleCompressionType (merge_dep) 校验失败,  compression type(undefined) is invalid for this platform!, 将会使用默认值 "merge_dep"
+构建参数 debug ("true") 校验失败, typeof debug should be boolean but get true, 将会使用默认值 true
+构建参数 md5Cache ("false") 校验失败, typeof md5Cache should be boolean but get false, 将会使用默认值 false

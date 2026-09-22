@@ -1,0 +1,17 @@
+# Cocos Creator
+**/library/
+**/temp/
+**/local/
+**/build/
+**/.creator/
+**/native/
+**/profiles/v2/packages/builder.json
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node / misc
+**/node_modules/
+*.zip
+*.rar
