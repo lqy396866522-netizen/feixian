@@ -5,29 +5,30 @@ export const UI_2D = 33554432;
 export const SAFE_X = 16;
 
 export const PL = {
-    hudH: 128,
-    hudTopY: 576,
+    hudH: 154,
+    hudTopY: 563,
 
-    cornerMapX: 300,
+    cornerMapX: 278,
     cornerMapY: 468,
     cornerCityY: 408,
     cornerBtn: 48,
 
-    stageTitleY: 492,
-    stageRailY: 448,
-    questBannerY: 404,
+    stageTitleY: 422,
+    stageRailY: 382,
+    questBannerY: 338,
     stageTitleW: 520,
     stageRailW: 480,
     questBannerW: 500,
     questBannerH: 48,
 
-    sideLeftX: -318,
-    sideRightX: 318,
-    sideIcon: 56,
-    sideSlotH: 86,
-    sideGap: 72,
-    sideTopY: 318,
-    chestY: 88,
+    /** 侧栏 X 由 SideRailsView 按 uiHalfWidth() 计算，此处为兜底 */
+    sideLeftX: -296,
+    sideRightX: 296,
+    sideIcon: 64,
+    sideSlotH: 92,
+    sideGap: 88,
+    sideTopY: 288,
+    chestY: -4,
 
     floatY: 78,
     heroX: -88,
@@ -36,14 +37,14 @@ export const PL = {
     mobBird: 86,
     mobTurtle: 98,
 
-    actionDockY: -400,
+    actionDockY: -338,
     actionDockW: 640,
     actionDockH: 210,
 
-    chatY: -500,
-    chatW: 680,
+    chatY: -482,
+    chatW: 648,
     chatH: 36,
 
-    tabBarY: -584,
-    tabBarH: 112,
+    tabBarY: -570,
+    tabBarH: 140,
 };

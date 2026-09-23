@@ -32,7 +32,8 @@ export class WorldHpBarsView {
 
     sync(m: GameModel, hero: Node | null, focusMob: Node | null) {
         if (hero?.isValid) {
-            this.heroRoot.setPosition(hero.position.x, hero.position.y + PL.charSize + 6, 0);
+            const hh = hero.getComponent(UITransform)?.height ?? PL.charSize;
+            this.heroRoot.setPosition(hero.position.x, hero.position.y + hh + 6, 0);
             this.heroRoot.active = true;
             const r = m.playerMaxHp ? m.playerHp / m.playerMaxHp : 0;
             this.f.setFillWidth(this.heroFill, this.barW - 4, r, new Color(72, 200, 96, 255));

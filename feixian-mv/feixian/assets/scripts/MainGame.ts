@@ -1,7 +1,7 @@
 import {
     _decorator, Component, Node, UITransform, Graphics, Label, Color, Vec3,
     Widget, Button, view, ResolutionPolicy, BlockInputEvents, Overflow, Sprite, SpriteFrame, resources, assetManager, ImageAsset, Texture2D,
-    tween, UIOpacity, profiler,
+    tween, UIOpacity, profiler, input, Input, EventKeyboard, EventMouse, KeyCode,
 } from 'cc';
 import { GameModel } from './GameModel';
 import { CombatLoop, CombatEvent } from './CombatLoop';
@@ -22,12 +22,28 @@ import { WorldChatBarView } from './ui/WorldChatBarView';
 import { RolePageView } from './ui/RolePageView';
 import { AlliancePageView } from './ui/AlliancePageView';
 import { PL } from './ui/ProductLayout';
+import { framePixelSize, sizeContain } from './ui/SpriteLayout';
 const { ccclass } = _decorator;
 
 const UI_2D = 33554432;
 const DESIGN_W = 720;
 const DESIGN_H = 1280;
 const CHAR_SIZE = 180; // ~25% of design width 720
+const WORLD_TILE_W = 720;
+const WORLD_TILE_H = 1280;
+const WORLD_COLS = 6;
+const WORLD_ROWS = 6;
+const WORLD_W = WORLD_TILE_W * WORLD_COLS;
+const WORLD_H = WORLD_TILE_H * WORLD_ROWS;
+const WORLD_HALF_W = WORLD_W / 2;
+const WORLD_HALF_H = WORLD_H / 2;
+const HERO_W = 172;
+const HERO_H = 196;
+const MOB_BIRD_W = 104;
+const MOB_BIRD_H = 98;
+const MOB_TURTLE_W = 124;
+const MOB_TURTLE_H = 104;
+const AUTO_ATTACK_RANGE = 210;
 
 const EQUIP_ICON: Record<string, string> = {
     weapon: 'textures/icons/equip_weapon',
@@ -116,6 +132,8 @@ export class MainGame extends Component {
     private layerFx!: Node;
     private layerReadout!: Node;
     private layerHud!: Node;
+    /** 可移动的大地图根节点；HUD 不放在此节点下，因而不会随镜头移动。 */
+    private worldRoot!: Node;
     private groundDropRoot!: Node;
     private attackFxNode: Node | null = null;
     private slashFrames: (SpriteFrame | null)[] = [null, null, null];
@@ -151,10 +169,14 @@ export class MainGame extends Component {
     private goldPulseNode!: Node;
     private chatAcc = 0;
     private wildMobBaseY: number[] = [];
+    private pressedKeys = new Set<number>();
+    private moveTarget: Vec3 | null = null;
+    private readonly heroMoveSpeed = 480;
 
     onLoad() {
         try { profiler.hideStats(); } catch (_) { /* preview */ }
-        view.setDesignResolutionSize(DESIGN_W, DESIGN_H, ResolutionPolicy.FIXED_HEIGHT);
+        // SHOW_ALL：等比缩放，完整显示 720 宽 UI，避免窄屏左右裁切与非等比压扁
+        view.setDesignResolutionSize(DESIGN_W, DESIGN_H, ResolutionPolicy.SHOW_ALL);
         this.uiLayer = this.node.layer || UI_2D;
         this.model = new GameModel();
         this.sfx = new SfxPlayer(this.node);
@@ -166,17 +188,23 @@ export class MainGame extends Component {
             this.model.chestReady = true;
         }
         this.buildUI();
+        input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
+        input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
         this.preloadFxAssets();
         this.refreshAll();
         console.log('[MainGame] 飞仙 MVP 启动, 战力=', this.model.combatPower, '关卡=', this.model.stageTitle);
     }
 
     onDestroy() {
+        input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
+        input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
         this.model && this.model.persist();
     }
 
     update(dt: number) {
-        this.loop.update(dt);
+        this.updateWorldMovement(dt);
+        this.updateWorldCamera(dt);
+        this.loop.update(dt, this.hasAutoAttackTarget());
         if (this.skillCd > 0) this.skillCd -= dt;
         if (this.chestBtn) this.chestBtn.active = !!this.model.chestReady;
         if (this.lootTimer > 0) {
@@ -231,7 +259,6 @@ export class MainGame extends Component {
             this.spawnGroundLoot(!!ev.cleared);
             this.refreshAll();
             this.respawnWildVisual();
-            this.walkHeroToNearestMob();
         } else if (ev.cleared) {
             this.refreshAll();
         } else {
@@ -268,6 +295,13 @@ export class MainGame extends Component {
         return best;
     }
 
+    /** 自动攻击只在地图上确实有野怪且处于攻击范围时触发。 */
+    private hasAutoAttackTarget(): boolean {
+        const target = this.nearestWildMob();
+        return !!target && !!this.heroNode?.isValid
+            && Vec3.distance(this.heroNode.position, target.position) <= AUTO_ATTACK_RANGE;
+    }
+
     private syncWorldHpBars() {
         if (!this.worldHpBars) return;
         this.worldHpBars.sync(this.model, this.heroNode ?? null, this.nearestWildMob());
@@ -281,7 +315,8 @@ export class MainGame extends Component {
             const p = mob.position;
             this.combatHud.showFloatAt(p.x + 18, p.y + ui.height + 28, text, color);
         } else if (this.heroNode?.isValid) {
-            this.combatHud.showFloatAt(this.heroNode.position.x + 40, this.heroNode.position.y + PL.charSize + 40, text, color);
+            const h = this.heroNode.getComponent(UITransform)?.height ?? HERO_H;
+            this.combatHud.showFloatAt(this.heroNode.position.x + 40, this.heroNode.position.y + h + 40, text, color);
         }
         this.floatTimer = 0.7;
     }
@@ -454,7 +489,7 @@ export class MainGame extends Component {
         this.uf.tryLoadSpriteBg(panel, 'textures/ui/product/panel_frame', 624, 880, () => {
             this.fill(panel, new Color(255, 255, 255, 230), 24);
         });
-        this.loadSprite(this.mk('brkArt', panel, 624, 880, 0, 0), 'textures/ui/breakthrough', 624, 880, false);
+        this.loadSprite(this.mk('brkArt', panel, 624, 880, 0, 0), 'textures/ui/breakthrough', 624, 880, false, false);
         this.label(panel, '境界突破', 32, C.navy, 0, 380, 300, 48, true);
         this.label(panel, '—', 26, C.navy, 0, 250, 520, 40, true).node.name = 'lblBrkRealm';
         this.label(panel, '—', 16, C.white, 0, 140, 400, 28, true).node.name = 'lblBrkProg';
@@ -620,11 +655,8 @@ export class MainGame extends Component {
             if (d < bestD) { bestD = d; best = m; }
         }
         if (!best) return;
-        const target = new Vec3(best.position.x - 100, best.position.y, 0);
-        tween(this.heroNode)
-            .to(0.42, { position: target }, { easing: 'sineInOut' })
-            .call(() => this.layoutActors())
-            .start();
+        // 自动战斗时也复用玩家移动系统，避免 Tween 与键盘/鼠标输入争夺角色坐标。
+        this.moveTarget = this.clampWorldPoint(new Vec3(best.position.x - 100, best.position.y, 0));
         if (this.mobNode?.isValid) {
             this.mobNode.setPosition(best.position.x, best.position.y, 0);
         }
@@ -640,7 +672,8 @@ export class MainGame extends Component {
                 if (!victim.isValid) return;
                 const hx2 = this.heroNode?.isValid ? this.heroNode.position.x : PL.heroX;
                 const nx = hx2 + 88 + Math.random() * 95;
-                const ny = this.heroBaseY - 6 + Math.random() * 48;
+                const hy2 = this.heroNode?.isValid ? this.heroNode.position.y : this.heroBaseY;
+                const ny = hy2 - 6 + Math.random() * 48;
                 victim.setPosition(nx, ny, 0);
                 victim.setScale(1, 1, 1);
                 this.layoutActors();
@@ -655,7 +688,11 @@ export class MainGame extends Component {
         list.sort((a, b) => b.position.y - a.position.y);
         list.forEach((n, i) => n.setSiblingIndex(i));
         const hx = this.heroNode?.isValid ? this.heroNode.position.x : PL.heroX;
-        if (this.heroNode?.isValid) this.heroNode.setScale(1, Math.abs(this.heroNode.scale.y) || 1, 1);
+        // hero 的 X 缩放由移动方向决定，不能在排序时重置。
+        if (this.heroNode?.isValid) {
+            const face = this.heroNode.scale.x < 0 ? -1 : 1;
+            this.heroNode.setScale(face, Math.abs(this.heroNode.scale.y) || 1, 1);
+        }
         for (const m of this.wildMobs) {
             if (!m?.isValid || Math.abs(m.scale.x) < 0.35) continue;
             const faceLeft = m.position.x >= hx;
@@ -686,51 +723,134 @@ export class MainGame extends Component {
     }
 
 
-    /** 玩法背景：720×1280 整图，避免 760 高度二次拉伸。见 docs/BG_FIELD_Q_SPEC.md */
-    private loadPlayFieldBg(node: Node) {
-        const paths = ['textures/bg/field_play_q', 'textures/bg/field_product', 'textures/bg/field_v2'];
-        const tryNext = (i: number) => {
-            if (i >= paths.length) {
-                console.warn('[skin] all play field bg paths failed');
+    /**
+     * 6×6 由同一张主图切出的地图块。每块都保留原始 720×1280 像素，
+     * 因此相邻边缘不经过二次采样，能够像一张完整大地图一样无缝衔接。
+     */
+    private buildWorldTiles(parent: Node) {
+        for (let row = 0; row < WORLD_ROWS; row++) {
+            for (let col = 0; col < WORLD_COLS; col++) {
+                const x = -WORLD_HALF_W + WORLD_TILE_W * (col + 0.5);
+                const y = WORLD_HALF_H - WORLD_TILE_H * (row + 0.5);
+                const tile = this.mk(`map_${row}_${col}`, parent, WORLD_TILE_W, WORLD_TILE_H, x, y);
+                this.uf.loadSprite(tile, `textures/bg/world/field_play_q_${row}_${col}`, WORLD_TILE_W, WORLD_TILE_H, false, () => {
+                    console.warn('[world] missing map tile', row, col);
+                }, false);
+            }
+        }
+    }
+
+    private onKeyDown(event: EventKeyboard) {
+        const key = event.keyCode;
+        if ([KeyCode.KEY_W, KeyCode.KEY_A, KeyCode.KEY_S, KeyCode.KEY_D,
+            KeyCode.ARROW_UP, KeyCode.ARROW_DOWN, KeyCode.ARROW_LEFT, KeyCode.ARROW_RIGHT].includes(key)) {
+            this.pressedKeys.add(key);
+            this.moveTarget = null;
+        }
+    }
+
+    private onKeyUp(event: EventKeyboard) {
+        this.pressedKeys.delete(event.keyCode);
+    }
+
+    private onWorldMouseDown(event: EventMouse) {
+        if (event.getButton() !== EventMouse.BUTTON_LEFT || this.tab !== 'play') return;
+        const point = event.getUILocation();
+        const screen = this.playRoot.getComponent(UITransform)!.convertToNodeSpaceAR(new Vec3(point.x, point.y, 0));
+        this.moveTarget = this.clampWorldPoint(new Vec3(
+            screen.x - this.worldRoot.position.x,
+            screen.y - this.worldRoot.position.y,
+            0,
+        ));
+    }
+
+    private clampWorldPoint(point: Vec3) {
+        const padding = 96;
+        return new Vec3(
+            Math.max(-WORLD_HALF_W + padding, Math.min(WORLD_HALF_W - padding, point.x)),
+            Math.max(-WORLD_HALF_H + padding, Math.min(WORLD_HALF_H - padding, point.y)),
+            0,
+        );
+    }
+
+    /** 键盘优先；松开键盘后继续执行最近一次鼠标点地移动。 */
+    private updateWorldMovement(dt: number) {
+        if (this.tab !== 'play' || !this.heroNode?.isValid) return;
+        let x = 0;
+        let y = 0;
+        if (this.pressedKeys.has(KeyCode.KEY_A) || this.pressedKeys.has(KeyCode.ARROW_LEFT)) x -= 1;
+        if (this.pressedKeys.has(KeyCode.KEY_D) || this.pressedKeys.has(KeyCode.ARROW_RIGHT)) x += 1;
+        if (this.pressedKeys.has(KeyCode.KEY_W) || this.pressedKeys.has(KeyCode.ARROW_UP)) y += 1;
+        if (this.pressedKeys.has(KeyCode.KEY_S) || this.pressedKeys.has(KeyCode.ARROW_DOWN)) y -= 1;
+
+        if (x === 0 && y === 0 && this.moveTarget) {
+            x = this.moveTarget.x - this.heroNode.position.x;
+            y = this.moveTarget.y - this.heroNode.position.y;
+            if (Math.hypot(x, y) < 3) {
+                this.moveTarget = null;
                 return;
             }
-            this.uf.loadSprite(node, paths[i], DESIGN_W, DESIGN_H, false, () => tryNext(i + 1));
-        };
-        tryNext(0);
+        }
+        const length = Math.hypot(x, y);
+        if (length <= 0) return;
+        const step = Math.min(this.heroMoveSpeed * dt, this.moveTarget ? length : this.heroMoveSpeed * dt);
+        const next = this.clampWorldPoint(new Vec3(
+            this.heroNode.position.x + x / length * step,
+            this.heroNode.position.y + y / length * step,
+            0,
+        ));
+        this.heroNode.setPosition(next);
+        if (Math.abs(x) > 0.01) this.heroNode.setScale(x < 0 ? -1 : 1, 1, 1);
+        this.layoutActors();
+    }
+
+    /** 角色永远位于世界坐标，镜头仅移动 worldRoot；屏幕 UI 不受影响。 */
+    private updateWorldCamera(dt: number) {
+        if (!this.worldRoot?.isValid || !this.heroNode?.isValid) return;
+        const targetX = Math.max(-(WORLD_HALF_W - DESIGN_W / 2), Math.min(WORLD_HALF_W - DESIGN_W / 2, -this.heroNode.position.x));
+        const targetY = Math.max(-(WORLD_HALF_H - DESIGN_H / 2), Math.min(WORLD_HALF_H - DESIGN_H / 2, -this.heroNode.position.y));
+        const t = Math.min(1, dt * 9);
+        this.worldRoot.setPosition(
+            this.worldRoot.position.x + (targetX - this.worldRoot.position.x) * t,
+            this.worldRoot.position.y + (targetY - this.worldRoot.position.y) * t,
+            0,
+        );
     }
 
     private buildPlay() {
         const r = this.playRoot;
-        const mkLayer = (name: string) => {
-            const n = this.mk(name, r, DESIGN_W, DESIGN_H, 0, 0);
+        this.worldRoot = this.mk('WorldRoot', r, WORLD_W, WORLD_H, 0, 0);
+        // 鼠标事件只绑定到世界根，侧栏/按钮等 HUD 为同级节点，不会触发点地移动。
+        this.worldRoot.on(Node.EventType.MOUSE_DOWN, this.onWorldMouseDown, this);
+        const mkWorldLayer = (name: string) => {
+            const n = this.mk(name, this.worldRoot, WORLD_W, WORLD_H, 0, 0);
             const g = n.getComponent(Graphics);
             if (g) g.enabled = false;
             return n;
         };
-        this.layerBg = mkLayer('LayerBg');
-        this.layerDecor = mkLayer('LayerDecor');
-        this.layerActors = mkLayer('LayerActors');
-        this.layerFx = mkLayer('LayerFx');
-        this.layerReadout = mkLayer('LayerReadout');
-        this.layerHud = mkLayer('LayerHud');
+        this.layerBg = mkWorldLayer('LayerBg');
+        this.layerDecor = mkWorldLayer('LayerDecor');
+        this.layerActors = mkWorldLayer('LayerActors');
+        this.layerFx = mkWorldLayer('LayerFx');
+        this.layerReadout = mkWorldLayer('LayerReadout');
+        this.layerHud = this.mk('LayerHud', r, DESIGN_W, DESIGN_H, 0, 0);
 
-        const fullBg = this.mk('fullMapBg', this.layerBg, DESIGN_W, DESIGN_H, 0, 0);
-        this.loadPlayFieldBg(fullBg);
+        this.buildWorldTiles(this.layerBg);
 
-        const field = this.mk('Field', this.layerDecor, DESIGN_W, DESIGN_H, 0, 0);
+        const field = this.mk('Field', this.layerDecor, WORLD_W, WORLD_H, 0, 0);
         this.fieldNode = field;
         const fg = field.getComponent(Graphics);
         if (fg) fg.enabled = false;
 
-        this.groundDropRoot = this.mk('drops', this.layerFx, DESIGN_W, DESIGN_H, 0, 0);
+        this.groundDropRoot = this.mk('drops', this.layerFx, WORLD_W, WORLD_H, 0, 0);
         const dg = this.groundDropRoot.getComponent(Graphics);
         if (dg) dg.enabled = false;
 
-        const heroY = PL.heroY;
+        const heroY = -120;
         this.heroBaseY = heroY;
         this.wildMobs = [];
         this.wildMobBaseY = [];
-        const hx = PL.heroX;
+        const hx = 0;
         const mobSpots: [number, number][] = [
             [hx + 92, heroY + 10],
             [hx + 138, heroY + 28],
@@ -738,29 +858,27 @@ export class MainGame extends Component {
             [hx + 112, heroY + 42],
             [hx + 158, heroY + 18],
         ];
-        const WILD_BIRD = PL.mobBird;
-        const WILD_TURTLE = PL.mobTurtle;
         for (let i = 0; i < mobSpots.length; i++) {
             const [mx, my] = mobSpots[i];
             const isTurtle = (i % 3) === 1;
-            const sz = isTurtle ? WILD_TURTLE : WILD_BIRD;
+            const w = isTurtle ? MOB_TURTLE_W : MOB_BIRD_W;
+            const h = isTurtle ? MOB_TURTLE_H : MOB_BIRD_H;
             const tex = isTurtle ? 'textures/chars/mob_turtle' : 'textures/chars/mob_bird';
-            const mob = this.mk('wild' + i, this.layerActors, sz, sz, mx, my);
+            const mob = this.mk('wild' + i, this.layerActors, w, h, mx, my);
             mob.getComponent(UITransform)!.setAnchorPoint(0.5, 0);
-            const ph = this.mk('wildPh', mob, sz, sz, 0, sz / 2);
+            const ph = this.mk('wildPh', mob, w, h, 0, h / 2);
             this.circle(ph, C.monster);
-            this.loadSprite(mob, tex, sz, sz, true);
+            this.loadSprite(mob, tex, w, h, true);
             this.wildMobs.push(mob);
             this.wildMobBaseY.push(my);
         }
 
-        const cz = PL.charSize;
-        this.heroNode = this.mk('hero', this.layerActors, cz, cz, PL.heroX, heroY);
+        this.heroNode = this.mk('hero', this.layerActors, HERO_W, HERO_H, hx, heroY);
         this.heroNode.getComponent(UITransform)!.setAnchorPoint(0.5, 0);
-        const heroPh = this.mk('heroPh', this.heroNode, cz, cz, 0, cz / 2);
+        const heroPh = this.mk('heroPh', this.heroNode, HERO_W, HERO_H, 0, HERO_H / 2);
         this.circle(heroPh, C.hero);
-        this.uf.loadSprite(this.heroNode, 'textures/chars/hero_product', cz, cz, true, () => {
-            this.loadSprite(this.heroNode, 'textures/chars/hero', cz, cz, true);
+        this.uf.loadSprite(this.heroNode, 'textures/chars/hero_product', HERO_W, HERO_H, true, () => {
+            this.loadSprite(this.heroNode, 'textures/chars/hero', HERO_W, HERO_H, true);
         });
 
         this.mobNode = this.mk('mon', this.layerActors, 1, 1, 80, heroY);
@@ -1040,7 +1158,7 @@ export class MainGame extends Component {
     }
 
     
-    private applySpriteFrame(node: Node, sf: SpriteFrame, w: number, h: number, footAnchor: boolean) {
+    private applySpriteFrame(node: Node, sf: SpriteFrame, boxW: number, boxH: number, footAnchor: boolean, preserveAspect = true) {
         const sp = node.getComponent(Sprite) || node.addComponent(Sprite);
         const ui = node.getComponent(UITransform) || node.addComponent(UITransform);
         sp.spriteFrame = sf;
@@ -1053,6 +1171,14 @@ export class MainGame extends Component {
         } catch (_) {}
         if (footAnchor) ui.setAnchorPoint(0.5, 0);
         else ui.setAnchorPoint(0.5, 0.5);
+        let w = boxW;
+        let h = boxH;
+        if (preserveAspect) {
+            const fp = framePixelSize(sf);
+            const fit = sizeContain(boxW, boxH, fp.w, fp.h);
+            w = fit.w;
+            h = fit.h;
+        }
         ui.setContentSize(w, h);
         // Hide circle/rect Graphics placeholder once real art is on
         const g = node.getComponent(Graphics);
@@ -1069,13 +1195,13 @@ export class MainGame extends Component {
         console.log('[skin] ok', node.name, w, h, 'foot=', footAnchor);
     }
 
-    private loadSprite(node: Node, path: string, w: number, h: number, footAnchor = false) {
+    private loadSprite(node: Node, path: string, w: number, h: number, footAnchor = false, preserveAspect = true) {
         const ui = node.getComponent(UITransform) || node.addComponent(UITransform);
         if (footAnchor) ui.setAnchorPoint(0.5, 0);
         ui.setContentSize(w, h);
         const tryApply = (sf: SpriteFrame | null | undefined, via: string) => {
             if (!sf) return false;
-            this.applySpriteFrame(node, sf, w, h, footAnchor);
+            this.applySpriteFrame(node, sf, w, h, footAnchor, preserveAspect);
             console.log('[skin] loaded via', via, path);
             return true;
         };

@@ -14,7 +14,7 @@ export class WorldChatBarView {
         this.f.tryLoadSpriteBg(chat, 'textures/ui/product/chat_bar', PL.chatW, PL.chatH, () => {
             this.f.fill(chat, C.chat, 8);
         });
-        this.lbl = this.f.label(chat, WORLD_CHAT_LINES[0], 16, C.white, 0, 0, 660, 30);
+        this.lbl = this.f.label(chat, WORLD_CHAT_LINES[0], 16, C.white, 0, 0, PL.chatW - 24, 30);
         this.lbl.horizontalAlign = Label.HorizontalAlign.LEFT;
     }
 

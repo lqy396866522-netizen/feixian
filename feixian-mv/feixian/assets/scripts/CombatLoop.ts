@@ -21,8 +21,11 @@ export class CombatLoop {
         this.model = model;
     }
 
-    update(dt: number): void {
-        if (!this.model.save.autoBattle) return;
+    update(dt: number, hasTargetInRange = true): void {
+        if (!this.model.save.autoBattle || !hasTargetInRange) {
+            this.acc = 0;
+            return;
+        }
         this.acc += dt;
         if (this.acc < this.interval) return;
         this.acc = 0;

@@ -3,6 +3,7 @@ import {
     resources, ImageAsset, Texture2D,
 } from 'cc';
 import { UI_FONT } from './UiTheme';
+import { framePixelSize, sizeContain } from './SpriteLayout';
 
 export class UiFactory {
     uiLayer: number;
@@ -92,15 +93,15 @@ export class UiFactory {
         const dot = this.mk('redDot', parent, 16, 16, x, y);
         this.loadSprite(dot, 'textures/ui/product/red_dot', 16, 16, false, () => {
             this.circle(dot, new Color(220, 64, 64, 255));
-        });
+        }, true);
         return dot;
     }
 
     tryLoadSpriteBg(node: Node, path: string, w: number, h: number, fallback: () => void) {
-        this.loadSprite(node, path, w, h, false, () => fallback());
+        this.loadSprite(node, path, w, h, false, () => fallback(), false);
     }
 
-    applySpriteFrame(node: Node, sf: SpriteFrame, w: number, h: number, footAnchor: boolean) {
+    applySpriteFrame(node: Node, sf: SpriteFrame, boxW: number, boxH: number, footAnchor: boolean, preserveAspect = true) {
         const sp = node.getComponent(Sprite) || node.addComponent(Sprite);
         const ui = node.getComponent(UITransform) || node.addComponent(UITransform);
         sp.spriteFrame = sf;
@@ -108,6 +109,14 @@ export class UiFactory {
         sp.type = Sprite.Type.SIMPLE;
         if (footAnchor) ui.setAnchorPoint(0.5, 0);
         else ui.setAnchorPoint(0.5, 0.5);
+        let w = boxW;
+        let h = boxH;
+        if (preserveAspect) {
+            const fp = framePixelSize(sf);
+            const fit = sizeContain(boxW, boxH, fp.w, fp.h);
+            w = fit.w;
+            h = fit.h;
+        }
         ui.setContentSize(w, h);
         const g = node.getComponent(Graphics);
         if (g) g.enabled = false;
@@ -116,13 +125,15 @@ export class UiFactory {
         }
     }
 
-    loadSprite(node: Node, path: string, w: number, h: number, footAnchor = false, onFail?: () => void) {
+    loadSprite(
+        node: Node, path: string, w: number, h: number, footAnchor = false, onFail?: () => void, preserveAspect = true,
+    ) {
         const ui = node.getComponent(UITransform) || node.addComponent(UITransform);
         if (footAnchor) ui.setAnchorPoint(0.5, 0);
         ui.setContentSize(w, h);
         const tryApply = (sf: SpriteFrame | null | undefined) => {
             if (!sf) return false;
-            this.applySpriteFrame(node, sf, w, h, footAnchor);
+            this.applySpriteFrame(node, sf, w, h, footAnchor, preserveAspect);
             return true;
         };
         resources.load(path + '/spriteFrame', SpriteFrame, (errSf, sf) => {

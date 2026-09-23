@@ -4,7 +4,7 @@
     "designResolution": {
       "width": 720,
       "height": 1280,
-      "fitWidth": false,
+      "fitWidth": true,
       "fitHeight": true
     },
     "startScene": "c0ffee01-2345-4678-9abc-def012345601",

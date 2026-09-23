@@ -2,6 +2,7 @@ import { Label, Node, Color } from 'cc';
 import { UiFactory } from './UiFactory';
 import { C } from './UiTheme';
 import { DESIGN_W, PL } from './ProductLayout';
+import { uiHalfWidth } from './SpriteLayout';
 import { GameModel } from '../GameModel';
 
 export type HudTopRefs = {
@@ -37,19 +38,19 @@ export class HudTopView {
             this.f.fill(bar, new Color(22, 36, 58, 235), 0);
         });
 
-        const av = this.f.mk('avatar', bar, 56, 56, -298, 22);
+        const av = this.f.mk('avatar', bar, 66, 66, -292, 20);
         this.f.circle(av, C.navy2);
         this.f.strokeCircle(av, C.gold, 2.5);
-        this.f.loadSprite(av, 'textures/chars/hero', 52, 52, false);
+        this.f.loadSprite(av, 'textures/chars/hero', 62, 62, false);
 
-        const lblName = this.f.label(bar, '道友', 20, C.white, -218, 38, 200, 28, true);
+        const lblName = this.f.label(bar, '道友', 21, C.white, -218, 42, 200, 28, true);
         lblName.horizontalAlign = Label.HorizontalAlign.LEFT;
-        const lblRealm = this.f.label(bar, '炼气期', 16, C.goldLt, -218, 14, 220, 24);
+        const lblRealm = this.f.label(bar, '炼气期', 16, C.goldLt, -218, 17, 220, 24);
         lblRealm.horizontalAlign = Label.HorizontalAlign.LEFT;
-        const lblLevel = this.f.label(bar, 'Lv.1', 14, C.inkMuted, -218, -8, 200, 22);
+        const lblLevel = this.f.label(bar, 'Lv.1', 14, C.white, -218, -6, 200, 22);
         lblLevel.horizontalAlign = Label.HorizontalAlign.LEFT;
 
-        const expBg = this.f.mk('expBg', bar, this.expBarW, 10, -218, -26);
+        const expBg = this.f.mk('expBg', bar, this.expBarW, 10, -218, -25);
         this.f.fill(expBg, new Color(0, 0, 0, 120), 5);
         const expFill = this.f.mk('expFill', expBg, this.expBarW - 4, 8, 0, 0);
         this.f.fill(expFill, C.ok, 4);
@@ -69,9 +70,9 @@ export class HudTopView {
             this.f.click(plus, () => this.onPlus());
             return p;
         };
-        const jadeP = pill(-60, 'textures/icons/res_jade');
-        const lingP = pill(78, 'textures/icons/res_herb');
-        const goldP = pill(216, 'textures/icons/res_gold');
+        const jadeP = pill(-72, 'textures/icons/res_jade');
+        const lingP = pill(58, 'textures/icons/res_herb');
+        const goldP = pill(188, 'textures/icons/res_gold');
         const lblJade = this.f.label(jadeP, '仙玉 0', 16, C.white, 6, 0, 82, 28, true);
         lblJade.horizontalAlign = Label.HorizontalAlign.LEFT;
         const lblLing = this.f.label(lingP, '灵石 0', 16, C.white, 6, 0, 82, 28, true);
@@ -79,25 +80,27 @@ export class HudTopView {
         const lblGold = this.f.label(goldP, '金币 0', 16, C.goldLt, 6, 0, 82, 28, true);
         lblGold.horizontalAlign = Label.HorizontalAlign.LEFT;
 
-        const powerBar = this.f.mk('powBar', bar, 380, 32, -40, -38);
+        const powerBar = this.f.mk('powBar', bar, 400, 34, -32, -48);
         this.f.tryLoadSpriteBg(powerBar, 'textures/ui/product/bar_power', 380, 32, () => this.f.fill(powerBar, C.navy, 8));
-        const lblTopPower = this.f.label(powerBar, '战力 0', 20, C.hot, 0, 0, 360, 28, true);
+        const lblTopPower = this.f.label(powerBar, '战力 0', 21, C.hot, 0, 0, 380, 30, true);
 
-        const menu = this.f.mk('menu', bar, 52, 52, 322, 22);
+        const menuX = uiHalfWidth() - 30;
+        const menu = this.f.mk('menu', bar, 52, 52, menuX, 22);
         this.f.tryLoadSpriteBg(menu, 'textures/ui/product/btn_menu', 52, 52, () => {
             this.f.circle(menu, C.navy2);
             this.f.label(menu, '≡', 26, C.white, 0, 0, 44, 44, true);
         });
         this.f.click(menu, () => this.onMenu());
 
-        const mapBtn = this.f.mk('worldMap', this.parent, PL.cornerBtn, PL.cornerBtn, PL.cornerMapX, PL.cornerMapY);
+        const cornerX = uiHalfWidth() - 28;
+        const mapBtn = this.f.mk('worldMap', this.parent, PL.cornerBtn, PL.cornerBtn, cornerX, PL.cornerMapY);
         this.f.tryLoadSpriteBg(mapBtn, 'textures/ui/product/side_manual', PL.cornerBtn, PL.cornerBtn, () => {
             this.f.circle(mapBtn, C.white);
         });
         this.f.label(mapBtn, '地图', 13, C.navy, 0, -34, 56, 20, true);
         this.f.click(mapBtn, () => this.onWorldMap());
 
-        const cityBtn = this.f.mk('city', this.parent, PL.cornerBtn, PL.cornerBtn, PL.cornerMapX, PL.cornerCityY);
+        const cityBtn = this.f.mk('city', this.parent, PL.cornerBtn, PL.cornerBtn, cornerX, PL.cornerCityY);
         this.f.circle(cityBtn, C.white);
         this.f.strokeCircle(cityBtn, C.gold, 2);
         this.f.label(cityBtn, '主城', 13, C.navy, 0, -34, 56, 20, true);
