@@ -1,0 +1,21 @@
+{
+  "source": "assets/ui-ref/generate_wireframes.py + MainGame.ts C",
+  "designSize": { "width": 720, "height": 1280 },
+  "colors": {
+    "grass": "#A8C48C",
+    "sky": "#C4DCC4",
+    "uiNavy": "#1A2A44",
+    "uiNavy2": "#243858",
+    "gold": "#D4A848",
+    "goldLt": "#F0D282",
+    "powerRed": "#DC4040",
+    "disabled": "#9498A0",
+    "disabledBg": "#D2D6DC",
+    "btnPrimary": "#488CDC",
+    "btnOk": "#48B078",
+    "tabOn": "#2ECC71",
+    "tabGlyph": "#E8F4FF",
+    "ink": "#202834",
+    "inkMuted": "#646E7C"
+  }
+}

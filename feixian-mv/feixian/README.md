@@ -2,7 +2,7 @@
 
 Cocos Creator **3.8.7** 竖屏挂机战斗 Demo（目标平台：微信小游戏 / Web Desktop 预览）。纯本地存档，无后端。
 
-> 当前状态（2026-09-23）：功能开发**正式暂停**。演示包冻结在本机 `http://127.0.0.1:8767`；P8 未开。恢复后从「v3 slash 白格 / 掉落认金终判 → 收庆雨四条落地」继续。
+> **产品图 v2**（`../LONG_TASK.md` LT2-001~029）：七 Tab 信息架构、`assets/scripts/ui/*View` 模块化壳层；Batch 1~4 贴图落盘 `assets/resources/textures/ui/product/`（缺图自动 Graphics 占位）。出图清单见 `docs/UI_ART_GPT_IMAGE.md`，验收见 `docs/QA_PRODUCT_CHECKLIST.md`。
 
 ## 仓库说明
 
@@ -18,22 +18,32 @@ Cocos Creator **3.8.7** 竖屏挂机战斗 Demo（目标平台：微信小游戏
 ## 快速开始
 
 1. 安装 [Cocos Creator 3.8.7](https://www.cocos.com/creator-download)
-2. 打开本仓库根目录为工程
+2. 打开 **`feixian-mv/feixian`** 为工程（含 `package.json` 的目录）
 3. 双击 `assets/scenes/main.scene`（若场景路径不同，以 `assets/scenes` 下实际场景为准）
 4. 确认 Canvas 上挂有 `MainGame` 组件
 5. 点击预览 ▶（设计分辨率 **720×1280** 竖屏）
 
-### 本机 Web Desktop 演示包
+### Web Desktop 演示包
 
-构建产物默认不入库（见 `.gitignore` 的 `build/`）。需要演示时在 Creator 中构建 `web-desktop`，或使用已同步到：
+1. Creator：**项目 → 构建发布 → Web Desktop → 构建**（输出目录可设为 `../build-web/web-desktop`）。
+2. 本地静态服务（示例）：
 
-`C:\Users\李庆雨\feixian-for-chat\preview\web-desktop`
-
-然后本地静态服务：
-
-```text
-http://127.0.0.1:8767
+```powershell
+cd feixian-mv\build-web\web-desktop
+python -m http.server 8767
 ```
+
+浏览器打开 `http://127.0.0.1:8767`（须 HTTP，勿用 file://）。
+
+### 贴图透明格修复
+
+若 PNG 带 baked 棋盘格，在工程根执行：
+
+```powershell
+python tools/strip_checkerboard_alpha.py
+```
+
+然后在 Creator 中 **重新导入** 变更过的贴图。
 
 ## 目录结构
 
@@ -55,7 +65,8 @@ feixian/
 
 | 文件 | 作用 |
 |------|------|
-| `assets/scripts/MainGame.ts` | 程序化 UI、战斗表现、Tab |
+| `assets/scripts/MainGame.ts` | 生命周期、Tab 路由、战斗表现 |
+| `assets/scripts/ui/*View.ts` | 产品图壳层（顶栏/侧栏/Tab/战斗 HUD 等） |
 | `assets/scripts/GameModel.ts` | 战力 / 掉落 / 突破 / 穿戴 |
 | `assets/scripts/CombatLoop.ts` | 自动战斗节拍 |
 | `assets/scripts/SaveSystem.ts` | 本地存档读写 |
@@ -69,7 +80,7 @@ feixian/
 
 ## Tab
 
-可进：装备、玩法、法术、异兽、设置。其余按 MVP 灰态提示。
+七入口：**角色、装备、法术、异兽、玩法、洞天（灰）、仙盟**。设置迁入右上 **汉堡菜单**（音效/清档）。未开放活动入口统一 Toast。
 
 ## 协作约定
 

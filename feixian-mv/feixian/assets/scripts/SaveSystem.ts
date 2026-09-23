@@ -48,6 +48,7 @@ export class SaveSystem {
             if (!Array.isArray((merged as any).beasts) || !(merged as any).beasts.length) {
                 (merged as any).beasts = [{ id: 'beast_fox', name: '青蔓灵狐', power: 1260 }];
             }
+            if (typeof (merged as any).playerLevel !== 'number') (merged as any).playerLevel = 2;
             return merged;
         } catch (e) {
             console.warn('[SaveSystem] load failed', e);

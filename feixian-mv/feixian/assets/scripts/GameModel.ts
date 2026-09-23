@@ -40,10 +40,11 @@ export class GameModel {
         return this.sfxEnabled;
     }
 
-    /** Gate for future AudioSource / click / combat cues */
-    playSfx(_name?: string): void {
+    playSfxHook: ((name?: string) => void) | null = null;
+
+    playSfx(name?: string): void {
         if (!this.sfxEnabled) return;
-        // MVP: no clip assets yet; toggle + persist is the deliverable
+        this.playSfxHook && this.playSfxHook(name || 'click');
     }
 
     getActiveBeast(): { id: string; name: string; power: number } | null {
@@ -168,8 +169,13 @@ export class GameModel {
 
     onMonsterKilled(): void {
         const s = this.save;
-        s.killsInStage += 1;
-        s.stageProgress = Math.min(1, s.killsInStage / s.killsNeeded);
+        if (s.killsInStage < s.killsNeeded) {
+            s.killsInStage += 1;
+        }
+        s.stageProgress = Math.min(1, s.killsInStage / Math.max(1, s.killsNeeded));
+        if (s.killsInStage >= s.killsNeeded) {
+            this.chestReady = true;
+        }
         const g = goldDrop(s.stage);
         s.gold += g;
         const ls = lingshiDrop(s.stage);
@@ -268,5 +274,49 @@ export class GameModel {
 
     nextBreakthroughNeed(): number {
         return breakthroughExpNeed(this.save.realmIndex, this.save.realmLayer);
+    }
+
+    realmStatusLine(): string {
+        const need = this.nextBreakthroughNeed();
+        const exp = Math.min(this.save.realmExp, need);
+        return `${this.realmText} · ${this.save.realmLayer}层 ${this.save.playerLevel}级 (${exp}/${need})`;
+    }
+
+    displayKillsInStage(): number {
+        return Math.min(this.save.killsInStage, this.save.killsNeeded);
+    }
+
+    previewPowerAfterBreak(): number {
+        let ri = this.save.realmIndex;
+        let rl = this.save.realmLayer + 1;
+        if (rl > 9) {
+            rl = 1;
+            ri = Math.min(ri + 1, REALM_NAMES.length - 1);
+        }
+        let p = baseCombatPower(ri, rl);
+        for (const slot of Object.keys(SLOT_LABELS) as EquipSlot[]) {
+            const id = this.save.equipped[slot];
+            if (!id) continue;
+            p += equipPowerBonus(this.getItem(id));
+        }
+        return Math.floor(p);
+    }
+
+    hasBetterEquip(): boolean {
+        for (const item of this.save.inventory) {
+            const cur = this.getEquipped(item.slot);
+            if (!cur) return true;
+            if (equipPowerBonus(item) > equipPowerBonus(cur)) return true;
+        }
+        return false;
+    }
+
+    equippedBlueCount(): number {
+        let n = 0;
+        for (const slot of Object.keys(SLOT_LABELS) as EquipSlot[]) {
+            const it = this.getEquipped(slot);
+            if (it && it.quality.includes('蓝')) n++;
+        }
+        return n;
     }
 }

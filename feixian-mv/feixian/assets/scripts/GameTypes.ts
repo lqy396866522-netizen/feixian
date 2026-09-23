@@ -35,6 +35,8 @@ export interface GameSave {
     equipped: Partial<Record<EquipSlot, string>>; // item id
     materials: Record<string, number>;
     playerName: string;
+    /** 展示用等级（线框），不参与战斗公式 */
+    playerLevel: number;
 }
 
 export const SLOT_LABELS: Record<EquipSlot, string> = {
@@ -191,5 +193,6 @@ export function createNewSave(): GameSave {
         },
         materials: { mat_grass: 3, mat_ore: 1 },
         playerName: '玩家昵称',
+        playerLevel: 2,
     };
 }

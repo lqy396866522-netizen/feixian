@@ -1,13 +1,27 @@
 import {
     _decorator, Component, Node, UITransform, Graphics, Label, Color, Vec3,
     Widget, Button, view, ResolutionPolicy, BlockInputEvents, Overflow, Sprite, SpriteFrame, resources, assetManager, ImageAsset, Texture2D,
-    tween, UIOpacity,
+    tween, UIOpacity, profiler,
 } from 'cc';
 import { GameModel } from './GameModel';
 import { CombatLoop, CombatEvent } from './CombatLoop';
 import { EquipItem, EquipSlot, SLOT_LABELS } from './GameTypes';
 import { SaveSystem } from './SaveSystem';
-
+import { SfxPlayer } from './SfxPlayer';
+import { TabId } from './ui/TabTypes';
+import { UiFactory } from './ui/UiFactory';
+import { HudTopView } from './ui/HudTopView';
+import { SideRailsView } from './ui/SideRailsView';
+import { StageQuestView } from './ui/StageQuestView';
+import { CombatHudView } from './ui/CombatHudView';
+import { WorldHpBarsView } from './ui/WorldHpBarsView';
+import { ActionDockView } from './ui/ActionDockView';
+import { TabBarView } from './ui/TabBarView';
+import { MenuOverlayView } from './ui/MenuOverlayView';
+import { WorldChatBarView } from './ui/WorldChatBarView';
+import { RolePageView } from './ui/RolePageView';
+import { AlliancePageView } from './ui/AlliancePageView';
+import { PL } from './ui/ProductLayout';
 const { ccclass } = _decorator;
 
 const UI_2D = 33554432;
@@ -50,8 +64,6 @@ const C = {
     hot: new Color(220, 90, 50, 255),
 };
 
-type TabId = 'equip' | 'spells' | 'beasts' | 'play' | 'cave' | 'guild';
-
 @ccclass('MainGame')
 export class MainGame extends Component {
     private model!: GameModel;
@@ -72,8 +84,6 @@ export class MainGame extends Component {
     private lblName!: Label;
     private lblStage!: Label;
     private lblStageProg!: Label;
-    private lblHeroHp!: Label;
-    private lblMonHp!: Label;
     private lblMonName!: Label;
     private lblFloat!: Label;
     private lblChat!: Label;
@@ -100,6 +110,12 @@ export class MainGame extends Component {
     /** Task2: flock of wild monsters on the map */
     private wildMobs: Node[] = [];
     private fieldNode!: Node;
+    private layerBg!: Node;
+    private layerDecor!: Node;
+    private layerActors!: Node;
+    private layerFx!: Node;
+    private layerReadout!: Node;
+    private layerHud!: Node;
     private groundDropRoot!: Node;
     private attackFxNode: Node | null = null;
     private slashFrames: (SpriteFrame | null)[] = [null, null, null];
@@ -117,13 +133,38 @@ export class MainGame extends Component {
     private equipListNode!: Node;
     private slotLabels: Partial<Record<EquipSlot, Label>> = {};
     private wearBtnLabel!: Label;
+    private sfx!: SfxPlayer;
+    private uf!: UiFactory;
+    private hudTop!: HudTopView;
+    private sideRails!: SideRailsView;
+    private stageQuest!: StageQuestView;
+    private combatHud!: CombatHudView;
+    private worldHpBars!: WorldHpBarsView;
+    private actionDock!: ActionDockView;
+    private tabBarView!: TabBarView;
+    private menuOverlay!: MenuOverlayView;
+    private chatBar!: WorldChatBarView;
+    private rolePage!: RolePageView;
+    private alliancePage!: AlliancePageView;
+    private breakthroughOverlay!: Node;
+    private sideEquipDot!: Node;
+    private goldPulseNode!: Node;
+    private chatAcc = 0;
+    private wildMobBaseY: number[] = [];
 
     onLoad() {
+        try { profiler.hideStats(); } catch (_) { /* preview */ }
         view.setDesignResolutionSize(DESIGN_W, DESIGN_H, ResolutionPolicy.FIXED_HEIGHT);
         this.uiLayer = this.node.layer || UI_2D;
         this.model = new GameModel();
+        this.sfx = new SfxPlayer(this.node);
+        this.sfx.setEnabled(this.model.sfxEnabled);
+        this.model.playSfxHook = (n) => this.sfx.play(n || 'click');
         this.loop = new CombatLoop(this.model);
         this.loop.onTick = (ev) => this.onCombat(ev);
+        if (this.model.save.killsInStage >= this.model.save.killsNeeded) {
+            this.model.chestReady = true;
+        }
         this.buildUI();
         this.preloadFxAssets();
         this.refreshAll();
@@ -153,8 +194,28 @@ export class MainGame extends Component {
         }
         if (this.floatTimer > 0) {
             this.floatTimer -= dt;
-            if (this.floatTimer <= 0 && this.lblFloat) this.lblFloat.string = '';
+            if (this.floatTimer <= 0) this.combatHud?.clearFloat();
         }
+        this.chatAcc += dt;
+        if (this.chatBar && this.chatAcc > 8) {
+            if (this.chatBar.tick(this.chatAcc)) this.chatAcc = 0;
+        }
+        const t = performance.now() * 0.001;
+        this.wildMobs.forEach((m, i) => {
+            if (!m?.isValid || !m.active) return;
+            const base = this.wildMobBaseY[i];
+            if (base == null) return;
+            m.setPosition(m.position.x, base + Math.sin(t * 1.1 + i * 0.7) * 5, 0);
+        });
+        if (this.tab === 'play') {
+            this.layoutActors();
+            this.syncWorldHpBars();
+        }
+    }
+
+    private pulseGoldBar() {
+        if (!this.goldPulseNode?.isValid) return;
+        tween(this.goldPulseNode).to(0.08, { scale: new Vec3(1.08, 1.08, 1) }).to(0.12, { scale: new Vec3(1, 1, 1) }).start();
     }
 
     private onCombat(ev: CombatEvent) {
@@ -163,6 +224,7 @@ export class MainGame extends Component {
         } else if (ev.dmgToMonster > 0) {
             this.showFloat(`-${ev.dmgToMonster}`, C.red);
             this.playAttackFx();
+            this.model.playSfx('hit');
         }
         // Task3: ground drop + tiny toast (no big settlement modal)
         if (ev.killed) {
@@ -194,10 +256,33 @@ export class MainGame extends Component {
         });
     }
 
+    private nearestWildMob(): Node | null {
+        if (!this.heroNode?.isValid) return this.wildMobs.find((m) => m?.isValid && m.active) ?? null;
+        let best: Node | null = null;
+        let bestD = 1e9;
+        for (const m of this.wildMobs) {
+            if (!m?.isValid || !m.active) continue;
+            const d = Vec3.distance(this.heroNode.position, m.position);
+            if (d < bestD) { bestD = d; best = m; }
+        }
+        return best;
+    }
+
+    private syncWorldHpBars() {
+        if (!this.worldHpBars) return;
+        this.worldHpBars.sync(this.model, this.heroNode ?? null, this.nearestWildMob());
+    }
+
     private showFloat(text: string, color: Color) {
-        if (!this.lblFloat) return;
-        this.lblFloat.string = text;
-        this.lblFloat.color = color;
+        if (!this.combatHud) return;
+        const mob = this.nearestWildMob();
+        if (mob?.isValid) {
+            const ui = mob.getComponent(UITransform)!;
+            const p = mob.position;
+            this.combatHud.showFloatAt(p.x + 18, p.y + ui.height + 28, text, color);
+        } else if (this.heroNode?.isValid) {
+            this.combatHud.showFloatAt(this.heroNode.position.x + 40, this.heroNode.position.y + PL.charSize + 40, text, color);
+        }
         this.floatTimer = 0.7;
     }
 
@@ -287,20 +372,139 @@ export class MainGame extends Component {
         this.equipRoot = this.mk('EquipRoot', this.root, DESIGN_W, DESIGN_H, 0, 0);
         this.equipRoot.active = false;
 
+        this.uf = new UiFactory(this.uiLayer);
         this.buildPlay();
+        this.buildProductShell();
         this.buildSpells();
-        this.buildSettings();
         this.buildBeasts();
-        this.buildChestBtn();
         this.buildEquip();
+        this.buildRoleAlliancePages();
         this.buildTopBar();
         this.buildTabBar();
+        this.buildChestBtn();
 
         this.grayToast = this.label(this.root, '', 22, C.white, 0, 80, 520, 56, true);
         this.fill(this.grayToast.node, C.navy, 16);
         this.grayToast.node.active = false;
         this.grayToast.node.setSiblingIndex(999);
         this.buildLootPanel();
+        this.buildBreakthroughOverlay();
+    }
+
+    private buildProductShell() {
+        this.sideRails = new SideRailsView(this.uf, this.layerHud, (m) => this.showToast(m));
+        this.sideRails.build();
+        this.stageQuest = new StageQuestView(this.uf, this.layerHud);
+        this.stageQuest.build();
+        this.combatHud = new CombatHudView(this.uf, this.layerReadout);
+        this.combatHud.build();
+        this.worldHpBars = new WorldHpBarsView(this.uf, this.layerReadout);
+        this.worldHpBars.build();
+        this.lblFloat = this.combatHud.lblFloat;
+        this.lblStage = this.stageQuest.lblStage;
+        this.lblStageProg = this.stageQuest.lblStageProg;
+        this.actionDock = new ActionDockView(
+            this.uf,
+            this.layerHud,
+            () => { this.model.toggleAuto(); this.refreshAll(); },
+            () => this.openBreakthroughOverlay(),
+            () => this.openBreakthroughOverlay(),
+            (t) => this.showToast(t),
+        );
+        this.actionDock.build();
+        this.lblAuto = this.actionDock.lblAuto;
+        this.lblBreak = this.actionDock.lblBreak;
+        this.lblBreakCost = this.actionDock.lblBreakCost;
+        this.barBreakFill = this.actionDock.barBreakFill;
+        this.chatBar = new WorldChatBarView(this.uf, this.root);
+        this.chatBar.build();
+        this.lblChat = this.chatBar.lbl;
+        this.menuOverlay = new MenuOverlayView(this.uf, this.root);
+        this.menuOverlay.build(
+            () => this.onToggleSfx(),
+            () => this.menuOverlay.close(),
+            () => this.rebuildAfterClearSave(),
+        );
+    }
+
+    private buildRoleAlliancePages() {
+        this.rolePage = new RolePageView(this.uf, this.root, (id) => this.setTab(id));
+        this.rolePage.build();
+        this.alliancePage = new AlliancePageView(this.uf, this.root, (id) => this.setTab(id), (m) => this.showToast(m));
+        this.alliancePage.build();
+    }
+
+    private rebuildAfterClearSave() {
+        this.model = new GameModel();
+        this.loop.model = this.model;
+        this.loop.onTick = (ev) => this.onCombat(ev);
+        this.sfx.setEnabled(this.model.sfxEnabled);
+        this.model.playSfxHook = (n) => this.sfx.play(n || 'click');
+        this.setTab('play');
+        this.refreshAll();
+        this.showToast('存档已清除');
+    }
+
+    private buildBreakthroughOverlay() {
+        this.breakthroughOverlay = this.mk('BreakOverlay', this.root, DESIGN_W, DESIGN_H, 0, 0);
+        this.breakthroughOverlay.addComponent(BlockInputEvents);
+        this.breakthroughOverlay.active = false;
+        this.fill(this.mk('dim', this.breakthroughOverlay, DESIGN_W, DESIGN_H, 0, 0), new Color(12, 18, 28, 180), 0);
+        const panel = this.mk('brkPanel', this.breakthroughOverlay, 624, 880, 0, 40);
+        this.uf.tryLoadSpriteBg(panel, 'textures/ui/product/panel_frame', 624, 880, () => {
+            this.fill(panel, new Color(255, 255, 255, 230), 24);
+        });
+        this.loadSprite(this.mk('brkArt', panel, 624, 880, 0, 0), 'textures/ui/breakthrough', 624, 880, false);
+        this.label(panel, '境界突破', 32, C.navy, 0, 380, 300, 48, true);
+        this.label(panel, '—', 26, C.navy, 0, 250, 520, 40, true).node.name = 'lblBrkRealm';
+        this.label(panel, '—', 16, C.white, 0, 140, 400, 28, true).node.name = 'lblBrkProg';
+        this.label(panel, '—', 22, C.ok, 0, 40, 520, 36, true).node.name = 'lblBrkCost';
+        const cancel = this.mk('brkCancel', panel, 200, 52, -120, -120);
+        this.fill(cancel, C.disabledBg, 12);
+        this.label(cancel, '取消', 22, C.ink, 0, 0, 160, 40, true);
+        this.click(cancel, () => this.closeBreakthroughOverlay());
+        const okBtn = this.mk('brkOk', panel, 200, 52, 120, -120);
+        this.fill(okBtn, C.primary, 12);
+        this.label(okBtn, '确认突破', 22, C.white, 0, 0, 180, 40, true);
+        this.click(okBtn, () => {
+            if (!this.model.tryBreakthrough()) this.showToast('灵石或进度不足');
+            else {
+                this.model.playSfx('break');
+                this.showToast('突破成功！');
+            }
+            this.closeBreakthroughOverlay();
+            this.refreshAll();
+        });
+        this.click(this.breakthroughOverlay.getChildByName('dim')!, () => this.closeBreakthroughOverlay());
+    }
+
+    private openBreakthroughOverlay() {
+        if (!this.breakthroughOverlay) return;
+        this.refreshBreakthroughOverlay();
+        this.breakthroughOverlay.active = true;
+        this.breakthroughOverlay.setSiblingIndex(998);
+    }
+
+    private closeBreakthroughOverlay() {
+        if (this.breakthroughOverlay) this.breakthroughOverlay.active = false;
+    }
+
+    private refreshBreakthroughOverlay() {
+        if (!this.breakthroughOverlay) return;
+        const panel = this.breakthroughOverlay.getChildByName('brkPanel');
+        if (!panel) return;
+        const m = this.model;
+        const s = m.save;
+        const need = m.nextBreakthroughNeed();
+        const cost = m.nextBreakthroughCost();
+        const findLbl = (n: string) => panel.getChildByName(n)?.getComponent(Label);
+        const lr = findLbl('lblBrkRealm');
+        if (lr) lr.string = m.realmText;
+        const lp = findLbl('lblBrkProg');
+        const exp = Math.min(s.realmExp, need);
+        if (lp) lp.string = `${exp} / ${need}`;
+        const lc = findLbl('lblBrkCost');
+        if (lc) lc.string = `灵石 × ${cost}（持有 ${s.lingshi}）`;
     }
 
     private buildLootPanel() {
@@ -330,7 +534,7 @@ export class MainGame extends Component {
         const hx = this.heroNode ? this.heroNode.position.x : 0;
         const baseX = hx + 40 + (Math.random() - 0.5) * 80;
         const baseY = this.heroBaseY + 20 + Math.random() * 40;
-        this.spawnOneDrop(baseX, baseY, 'textures/fx/drop_gold_v3', '+' + loot.gold + '金', C.goldLt);
+        this.spawnOneDrop(baseX, baseY, 'textures/fx/drop_gold_v3', '+' + loot.gold + '金', C.goldLt, true);
         if (loot.equip) {
             this.spawnOneDrop(baseX + 56, baseY + 8, 'textures/fx/drop_equip', loot.equip.name, C.cyan);
         }
@@ -339,7 +543,7 @@ export class MainGame extends Component {
         }
     }
 
-    private spawnOneDrop(x: number, y: number, tex: string, tip: string, tipColor: Color) {
+    private spawnOneDrop(x: number, y: number, tex: string, tip: string, tipColor: Color, pulseGold = false) {
         const parent = this.groundDropRoot;
         const n = this.mk('gdrop', parent, 72, 72, x, y);
         const cached = tex.indexOf('drop_gold_v3') >= 0 ? this.dropGoldSf : (tex.indexOf('drop_equip') >= 0 ? this.dropEquipSf : null);
@@ -356,7 +560,10 @@ export class MainGame extends Component {
                 position: new Vec3(hero.position.x, hero.position.y + 50, 0),
                 scale: new Vec3(0.25, 0.25, 1),
             }, { easing: 'sineIn' })
-            .call(() => { if (n.isValid) n.destroy(); })
+            .call(() => {
+                if (n.isValid) n.destroy();
+                if (pulseGold) this.pulseGoldBar();
+            })
             .start();
     }
 
@@ -367,8 +574,12 @@ export class MainGame extends Component {
             this.attackFxNode.destroy();
         }
         const hp = this.heroNode.position;
-        const FX = Math.round(CHAR_SIZE * 1.2);
-        const fx = this.mk('atkFx', this.playRoot, FX, FX, hp.x + Math.round(CHAR_SIZE * 0.55), hp.y + Math.round(CHAR_SIZE * 0.55));
+        const target = this.nearestWildMob();
+        const th = target?.getComponent(UITransform)?.height ?? PL.mobBird;
+        const tx = target?.isValid ? target.position.x - 20 : hp.x + 90;
+        const ty = target?.isValid ? target.position.y + th * 0.55 : hp.y + PL.charSize * 0.45;
+        const FX = Math.round(PL.charSize * 0.95);
+        const fx = this.mk('atkFx', this.layerFx, FX, FX, (hp.x + tx) * 0.5, (hp.y + ty) * 0.5 + 20);
         this.attackFxNode = fx;
         fx.getComponent(UITransform)!.setAnchorPoint(0.15, 0.5);
         const sp = fx.addComponent(Sprite);
@@ -412,20 +623,10 @@ export class MainGame extends Component {
         const target = new Vec3(best.position.x - 100, best.position.y, 0);
         tween(this.heroNode)
             .to(0.42, { position: target }, { easing: 'sineInOut' })
-            .call(() => {
-                if (this.lblHeroHp?.node?.isValid) {
-                    this.lblHeroHp.node.setPosition(target.x, target.y - 24, 0);
-                }
-            })
+            .call(() => this.layoutActors())
             .start();
-        if (this.lblHeroHp?.node?.isValid) {
-            // follow roughly during walk
-            tween(this.lblHeroHp.node).to(0.42, { position: new Vec3(target.x, target.y - 24, 0) }, { easing: 'sineInOut' }).start();
-        }
-        // duel focus mob follows that wild slot
         if (this.mobNode?.isValid) {
             this.mobNode.setPosition(best.position.x, best.position.y, 0);
-            if (this.lblMonHp) this.lblMonHp.node.setPosition(best.position.x, best.position.y - 24, 0);
         }
     }
 
@@ -437,179 +638,146 @@ export class MainGame extends Component {
             .to(0.12, { scale: new Vec3(0.05, 0.05, 1) })
             .call(() => {
                 if (!victim.isValid) return;
-                const nx = -240 + Math.random() * 480;
-                const ny = this.heroBaseY - 20 + Math.random() * 140;
+                const hx2 = this.heroNode?.isValid ? this.heroNode.position.x : PL.heroX;
+                const nx = hx2 + 88 + Math.random() * 95;
+                const ny = this.heroBaseY - 6 + Math.random() * 48;
                 victim.setPosition(nx, ny, 0);
                 victim.setScale(1, 1, 1);
+                this.layoutActors();
             })
             .start();
     }
 
-
-    private buildTopBar() {
-        const bar = this.mk('TopBar', this.root, 700, 70, 0, 590);
-        this.fill(bar, new Color(26, 42, 68, 210), 18);
-
-        const goldP = this.mk('goldP', bar, 200, 44, -230, 0);
-        this.fill(goldP, C.navy2, 16);
-        const goldIcon = this.mk('goldIcon', goldP, 36, 36, -70, 0);
-        this.loadSprite(goldIcon, 'textures/icons/res_gold', 36, 36, false);
-        this.lblGold = this.label(goldP, '金 0', 20, C.goldLt, 0, 0, 190, 40, true);
-
-        const lingP = this.mk('lingP', bar, 180, 44, 0, 0);
-        this.fill(lingP, C.navy2, 16);
-        this.lblLing = this.label(lingP, '灵石 0', 20, C.goldLt, 0, 0, 170, 40, true);
-
-        const jadeP = this.mk('jadeP', bar, 140, 44, 160, 0);
-        this.fill(jadeP, C.navy2, 16);
-        this.lblJade = this.label(jadeP, '仙玉 0', 20, C.goldLt, 0, 0, 130, 40, true);
-
-        const powP = this.mk('powP', bar, 150, 44, 300, 0);
-        this.fill(powP, C.navy2, 16);
-        this.lblTopPower = this.label(powP, '战力 0', 20, C.hot, 0, 0, 140, 40, true);
+    /** 背景 < 装饰 < 地面单位(近大远小靠 sibling) < 特效 < 血条/飘字 < HUD */
+    private layoutActors() {
+        const list: Node[] = this.wildMobs.filter((m) => m?.isValid);
+        if (this.heroNode?.isValid) list.push(this.heroNode);
+        list.sort((a, b) => b.position.y - a.position.y);
+        list.forEach((n, i) => n.setSiblingIndex(i));
+        const hx = this.heroNode?.isValid ? this.heroNode.position.x : PL.heroX;
+        if (this.heroNode?.isValid) this.heroNode.setScale(1, Math.abs(this.heroNode.scale.y) || 1, 1);
+        for (const m of this.wildMobs) {
+            if (!m?.isValid || Math.abs(m.scale.x) < 0.35) continue;
+            const faceLeft = m.position.x >= hx;
+            m.setScale(faceLeft ? -Math.abs(m.scale.x) : Math.abs(m.scale.x), Math.abs(m.scale.y) || 1, 1);
+        }
     }
 
 
-    /** Task1: design field background (720×1280 art, cover play field) */
-    private paintMapBackground(field: Node) {
-        // field-local crop of the same map art (full screen already on playRoot)
-        const bg = this.mk('mapBg', field, DESIGN_W, 760, 0, 0);
-        this.loadSprite(bg, 'textures/bg/field_v2', DESIGN_W, 760, false);
+    private buildTopBar() {
+        this.hudTop = new HudTopView(
+            this.uf,
+            this.root,
+            () => this.menuOverlay.open(this.model),
+            () => this.showToast('商城未开放'),
+            () => this.showToast('世界地图未开放'),
+            () => this.showToast('主城未开放'),
+        );
+        const refs = this.hudTop.build();
+        this.lblGold = refs.lblGold;
+        this.lblLing = refs.lblLing;
+        this.lblJade = refs.lblJade;
+        this.lblName = refs.lblName;
+        this.lblRealm = refs.lblRealm;
+        this.lblPower = refs.lblPower;
+        this.lblTopPower = refs.lblTopPower;
+        this.goldPulseNode = refs.goldPulseNode;
+        refs.root.setSiblingIndex(900);
+    }
+
+
+    /** 玩法背景：720×1280 整图，避免 760 高度二次拉伸。见 docs/BG_FIELD_Q_SPEC.md */
+    private loadPlayFieldBg(node: Node) {
+        const paths = ['textures/bg/field_play_q', 'textures/bg/field_product', 'textures/bg/field_v2'];
+        const tryNext = (i: number) => {
+            if (i >= paths.length) {
+                console.warn('[skin] all play field bg paths failed');
+                return;
+            }
+            this.uf.loadSprite(node, paths[i], DESIGN_W, DESIGN_H, false, () => tryNext(i + 1));
+        };
+        tryNext(0);
     }
 
     private buildPlay() {
         const r = this.playRoot;
-        const field = this.mk('Field', r, DESIGN_W, 760, 0, 80);
+        const mkLayer = (name: string) => {
+            const n = this.mk(name, r, DESIGN_W, DESIGN_H, 0, 0);
+            const g = n.getComponent(Graphics);
+            if (g) g.enabled = false;
+            return n;
+        };
+        this.layerBg = mkLayer('LayerBg');
+        this.layerDecor = mkLayer('LayerDecor');
+        this.layerActors = mkLayer('LayerActors');
+        this.layerFx = mkLayer('LayerFx');
+        this.layerReadout = mkLayer('LayerReadout');
+        this.layerHud = mkLayer('LayerHud');
+
+        const fullBg = this.mk('fullMapBg', this.layerBg, DESIGN_W, DESIGN_H, 0, 0);
+        this.loadPlayFieldBg(fullBg);
+
+        const field = this.mk('Field', this.layerDecor, DESIGN_W, DESIGN_H, 0, 0);
         this.fieldNode = field;
-        // full-screen map art (design 720×1280)
-        const fullBg = this.mk('fullMapBg', r, DESIGN_W, DESIGN_H, 0, 0);
-        this.loadSprite(fullBg, 'textures/bg/field_v2', DESIGN_W, DESIGN_H, false);
-        fullBg.setSiblingIndex(0);
-        this.paintMapBackground(field);
-        // field procedural fill no longer needed — hide old green under art
-        field.getComponent(Graphics)?.clear();
+        const fg = field.getComponent(Graphics);
+        if (fg) fg.enabled = false;
 
-        const cave = this.mk('cave', field, 170, 80, 0, 200);
-        this.fill(cave, new Color(55, 70, 58, 200), 16);
-        cave.active = false; // real map art includes scenery
+        this.groundDropRoot = this.mk('drops', this.layerFx, DESIGN_W, DESIGN_H, 0, 0);
+        const dg = this.groundDropRoot.getComponent(Graphics);
+        if (dg) dg.enabled = false;
 
-        this.groundDropRoot = this.mk('drops', r, DESIGN_W, 400, 0, 80);
-
-        // player info
-        const info = this.mk('info', r, 340, 110, -170, 500);
-        const av = this.mk('avatar', info, 72, 72, -120, 8);
-        this.circle(av, C.navy);
-        this.label(av, '头像', 16, C.white, 0, 0, 70, 30);
-        this.lblName = this.label(info, '玩家昵称', 22, C.ink, 40, 28, 220, 32, true);
-        this.lblName.horizontalAlign = Label.HorizontalAlign.LEFT;
-        this.lblPower = this.label(info, '战力 0', 22, C.red, 40, -2, 220, 30, true);
-        this.lblPower.horizontalAlign = Label.HorizontalAlign.LEFT;
-        this.lblRealm = this.label(info, '炼气期', 18, C.inkMuted, 40, -32, 240, 28);
-        this.lblRealm.horizontalAlign = Label.HorizontalAlign.LEFT;
-
-        this.lblStage = this.label(r, '2-清萍原野', 28, C.ink, 0, 430, 400, 40, true);
-
-        const stageBar = this.mk('stageBar', r, 420, 18, 0, 400);
-        this.fill(stageBar, new Color(255, 255, 255, 180), 9);
-        this.barStageFill = this.mk('stageFill', stageBar, 200, 14, -110, 0);
-        this.fill(this.barStageFill, C.gold, 7);
-        this.lblStageProg = this.label(r, '0/5', 16, C.ink, 240, 400, 80, 24);
-
-        // Task2: many wild monsters on map + walkable hero
-        const heroY = 30;
+        const heroY = PL.heroY;
         this.heroBaseY = heroY;
         this.wildMobs = [];
+        this.wildMobBaseY = [];
+        const hx = PL.heroX;
         const mobSpots: [number, number][] = [
-            [160, heroY], [240, heroY + 50], [80, heroY + 90], [-40, heroY + 40],
-            [300, heroY - 10], [-120, heroY + 70], [40, heroY + 20], [200, heroY + 110],
-            [-200, heroY + 30], [120, heroY - 30],
+            [hx + 92, heroY + 10],
+            [hx + 138, heroY + 28],
+            [hx + 178, heroY - 2],
+            [hx + 112, heroY + 42],
+            [hx + 158, heroY + 18],
         ];
-        // bird + turtle mix; turtle ~20% of 720 ≈ 144
-        const WILD_BIRD = 100;
-        const WILD_TURTLE = 144;
+        const WILD_BIRD = PL.mobBird;
+        const WILD_TURTLE = PL.mobTurtle;
         for (let i = 0; i < mobSpots.length; i++) {
             const [mx, my] = mobSpots[i];
-            const isTurtle = (i % 3) === 1; // ~1/3 turtles
+            const isTurtle = (i % 3) === 1;
             const sz = isTurtle ? WILD_TURTLE : WILD_BIRD;
             const tex = isTurtle ? 'textures/chars/mob_turtle' : 'textures/chars/mob_bird';
-            const mob = this.mk('wild' + i, r, sz, sz, mx, my);
+            const mob = this.mk('wild' + i, this.layerActors, sz, sz, mx, my);
             mob.getComponent(UITransform)!.setAnchorPoint(0.5, 0);
             const ph = this.mk('wildPh', mob, sz, sz, 0, sz / 2);
             this.circle(ph, C.monster);
             this.loadSprite(mob, tex, sz, sz, true);
             this.wildMobs.push(mob);
+            this.wildMobBaseY.push(my);
         }
 
-        this.heroNode = this.mk('hero', r, CHAR_SIZE, CHAR_SIZE, -160, heroY);
+        const cz = PL.charSize;
+        this.heroNode = this.mk('hero', this.layerActors, cz, cz, PL.heroX, heroY);
         this.heroNode.getComponent(UITransform)!.setAnchorPoint(0.5, 0);
-        const heroPh = this.mk('heroPh', this.heroNode, CHAR_SIZE, CHAR_SIZE, 0, CHAR_SIZE / 2);
+        const heroPh = this.mk('heroPh', this.heroNode, cz, cz, 0, cz / 2);
         this.circle(heroPh, C.hero);
-        this.loadSprite(this.heroNode, 'textures/chars/hero', CHAR_SIZE, CHAR_SIZE, true);
-        this.label(this.heroNode, '主角', 16, C.white, 0, CHAR_SIZE + 28, 100, 28, true);
-        this.lblHeroHp = this.label(r, 'HP', 18, C.ink, -160, heroY - 24, 160, 28);
+        this.uf.loadSprite(this.heroNode, 'textures/chars/hero_product', cz, cz, true, () => {
+            this.loadSprite(this.heroNode, 'textures/chars/hero', cz, cz, true);
+        });
 
-        // duel focus readout (combat model still 1 target); hide big duel sprite, keep HP label
-        this.mobNode = this.mk('mon', r, 1, 1, 160, heroY);
+        this.mobNode = this.mk('mon', this.layerActors, 1, 1, 80, heroY);
         this.mobNode.active = false;
-        this.lblMonName = this.label(r, '野怪×' + mobSpots.length, 18, C.ink, 220, 360, 160, 28, true);
-        this.lblMonHp = this.label(r, 'HP', 18, C.ink, 160, heroY - 24, 160, 28);
-
-        this.lblFloat = this.label(r, '', 28, C.red, 160, 160, 160, 40, true);
-
-        // side buttons
-        const sideY = [220, 130, 40];
-        const sideT = ['礼包', '菜单', '装备'];
-        sideT.forEach((t, i) => {
-            const b = this.mk('side' + t, r, 70, 70, 300, sideY[i]);
-            this.circle(b, C.navy2);
-            this.label(b, t, 18, C.white, 0, 0, 66, 28, true);
-            if (t === '装备') this.click(b, () => this.setTab('equip'));
-            else this.click(b, () => this.showToast('MVP 未开放'));
-        });
-
-        // auto battle
-        const auto = this.mk('auto', r, 100, 100, -280, -160);
-        this.circle(auto, C.gold);
-        this.lblAuto = this.label(auto, '自动开', 22, C.navy, 0, 0, 90, 40, true);
-        this.click(auto, () => {
-            this.model.toggleAuto();
-            this.refreshAll();
-        });
-
-        // gray skills
-        ['技能', '召唤', '增益'].forEach((t, i) => {
-            const b = this.mk('sk' + t, r, 64, 64, 40 + i * 80, -170);
-            this.circle(b, C.disabledBg);
-            this.label(b, t, 16, C.disabled, 0, 0, 60, 24);
-            this.click(b, () => this.showToast('法术/召唤未开放'));
-        });
-
-        // breakthrough bar
-        const br = this.mk('breakBar', r, 680, 70, 0, -260);
-        this.fill(br, C.navy, 16);
-        this.label(br, '境界', 20, C.goldLt, -280, 0, 70, 30, true);
-        this.barBreakFill = this.mk('bfill', br, 320, 22, -40, 0);
-        this.fill(this.barBreakFill, C.ok, 8);
-        this.lblBreak = this.label(br, '突破', 18, C.white, -40, 0, 360, 30);
-        this.lblBreakCost = this.label(br, '灵石20', 18, C.goldLt, 250, 0, 140, 30, true);
-        this.click(br, () => {
-            const ok = this.model.tryBreakthrough();
-            if (!ok) this.showToast('灵石或进度不足');
-            this.refreshAll();
-        });
-
-        const chat = this.mk('chat', r, 680, 36, 0, -320);
-        this.fill(chat, C.chat, 8);
-        this.lblChat = this.label(chat, '[世界] 有道友正在清萍原野修炼…', 16, C.white, 0, 0, 660, 30);
-        this.lblChat.horizontalAlign = Label.HorizontalAlign.LEFT;
+        this.layoutActors();
     }
 
     private buildEquip() {
         const r = this.equipRoot;
         this.fill(this.mk('eqBg', r, DESIGN_W, DESIGN_H, 0, 0), new Color(230, 236, 244, 255), 0);
+        const shell = this.mk('eqShell', r, 680, 900, 0, 40);
+        this.uf.tryLoadSpriteBg(shell, 'textures/ui/product/panel_frame', 680, 900, () => {
+            this.fill(shell, new Color(255, 255, 255, 0), 0);
+        });
 
         const power = this.mk('eqPower', r, 680, 70, 0, 500);
-        this.fill(power, C.navy, 16);
+        this.uf.tryLoadSpriteBg(power, 'textures/ui/product/bar_power', 680, 70, () => this.fill(power, C.navy, 16));
         this.lblEquipPower = this.label(power, '战力 0', 26, C.goldLt, 0, 0, 640, 50, true);
 
         const doll = this.mk('doll', r, 680, 280, 0, 300);
@@ -700,6 +868,10 @@ export class MainGame extends Component {
     private buildBeasts() {
         const r = this.beastsRoot;
         this.fill(this.mk('beastBg', r, DESIGN_W, DESIGN_H, 0, 0), new Color(220, 232, 220, 255), 0);
+        const shell = this.mk('beastShell', r, 640, 720, 0, 80);
+        this.uf.tryLoadSpriteBg(shell, 'textures/ui/product/panel_frame', 640, 720, () => {
+            this.fill(shell, C.panel, 20);
+        });
         this.label(r, '异兽', 28, C.ink, 0, 520, 200, 40, true);
 
         // platform
@@ -771,49 +943,20 @@ export class MainGame extends Component {
 
     private onToggleSfx() {
         const on = this.model.toggleSfx();
-        this.lblSfx.string = on ? '开' : '关';
-        this.lblSfx.color = on ? C.ok : C.disabled;
-        // reload icon
-        if (this.sfxIconNode) {
-            this.loadSprite(this.sfxIconNode, on ? 'textures/icons/sfx_on' : 'textures/icons/sfx_off', 36, 36, false);
-        }
+        this.sfx.setEnabled(on);
+        this.menuOverlay?.refreshSfx(on);
         this.showToast(on ? '音效已开启' : '音效已关闭');
         this.model.playSfx('click');
     }
 
     private buildTabBar() {
-        // design: bar ~60px@375 → ~115@720; icon Ø46@375 → ~88@720; selected +4px → ~96
-        const barH = 120;
-        const bar = this.mk('TabBar', this.root, DESIGN_W, barH, 0, -580);
-        this.fill(bar, C.navy, 0);
-
-        const tabs: { id: TabId; glyph: string; name: string; enabled: boolean }[] = [
-            { id: 'equip', glyph: '装', name: '装备', enabled: true },
-            { id: 'spells', glyph: '法', name: '法术', enabled: true },
-            { id: 'beasts', glyph: '异', name: '异兽', enabled: true },
-            { id: 'play', glyph: '玩', name: '玩法', enabled: true },
-            { id: 'cave', glyph: '调', name: '洞天', enabled: false },
-            { id: 'guild', glyph: '置', name: '设置', enabled: true },
-        ];
-        const n = tabs.length;
-        const gap = DESIGN_W / n;
-        const startX = -DESIGN_W / 2 + gap / 2;
-        tabs.forEach((t, i) => {
-            const x = startX + i * gap;
-            const b = this.mk('tab_' + t.id, bar, 88, 88, x, 10);
-            this.tabDots[t.id] = b;
-            this.paintTabDot(b, t.id === this.tab, t.enabled);
-            const gl = this.label(b, t.glyph, 26, t.enabled ? C.tabGlyph : C.disabled, 0, 6, 70, 36, true);
-            this.tabLabels[t.id] = this.label(b, t.name, 14, t.enabled ? C.goldLt : C.disabled, 0, -28, 80, 22);
-            this.click(b, () => {
-                if (!t.enabled) {
-                    this.showToast(`${t.name} 未开放`);
-                    return;
-                }
-                this.setTab(t.id);
-            });
-        });
-        this.refreshTabs();
+        this.tabBarView = new TabBarView(this.uf, this.root, (id) => this.setTab(id));
+        this.tabBarView.build();
+        this.tabDots = this.tabBarView.tabDots as Record<TabId, Node>;
+        this.tabLabels = this.tabBarView.tabLabels as Record<TabId, Label>;
+        this.tabBarView.refresh(this.tab);
+        const eqTab = this.tabDots.equip;
+        if (eqTab) this.sideEquipDot = this.uf.addRedDot(eqTab, 28, 28);
     }
 
     private paintTabDot(n: Node, selected: boolean, enabled: boolean) {
@@ -853,6 +996,10 @@ export class MainGame extends Component {
     private buildSpells() {
         const r = this.spellsRoot;
         this.fill(r, new Color(24, 32, 48, 240), 0);
+        const shell = this.mk('spellShell', r, 640, 720, 0, 80);
+        this.uf.tryLoadSpriteBg(shell, 'textures/ui/product/panel_frame', 640, 720, () => {
+            this.fill(shell, C.panel, 20);
+        });
         this.label(r, '法术', 28, C.goldLt, 0, 520, 200, 40, true);
         this.label(r, '已解锁主动技 1/1', 18, C.inkMuted, 0, 470, 300, 30, true);
         const card = this.mk('skill1', r, 560, 180, 0, 200);
@@ -966,33 +1113,37 @@ export class MainGame extends Component {
     }
 
     private buildChestBtn() {
-        this.chestBtn = this.mk('ChestBtn', this.playRoot, 120, 120, 280, 120);
-        this.circle(this.chestBtn, C.gold);
-        this.lblChest = this.label(this.chestBtn, '宝箱', 22, C.navy, 0, 0, 100, 40, true);
-        this.chestBtn.active = false;
+        this.chestBtn = this.sideRails.chestBtn;
+        this.lblChest = this.label(this.chestBtn, '宝箱', 14, C.navy, 0, 0, 60, 24, true);
         this.click(this.chestBtn, () => {
             if (this.model.tryOpenChest()) {
+                this.model.playSfx('break');
                 this.showLootPanel(true);
+                this.pulseGoldBar();
                 this.refreshAll();
             }
         });
     }
 
     private setTab(id: TabId) {
-        if (id !== 'play' && id !== 'equip' && id !== 'spells' && id !== 'guild' && id !== 'beasts') {
-            this.showToast('功能未开放');
+        if (id === 'cave') {
+            this.showToast('洞天未开放');
             return;
         }
         this.tab = id;
+        this.model.playSfx('click');
         this.playRoot.active = id === 'play';
         this.equipRoot.active = id === 'equip';
         if (this.spellsRoot) this.spellsRoot.active = id === 'spells';
-        if (this.settingsRoot) this.settingsRoot.active = id === 'guild';
         if (this.beastsRoot) this.beastsRoot.active = id === 'beasts';
-        this.refreshTabs();
+        if (this.rolePage?.root) this.rolePage.root.active = id === 'role';
+        if (this.alliancePage?.root) this.alliancePage.root.active = id === 'alliance';
+        if (this.settingsRoot) this.settingsRoot.active = false;
+        this.tabBarView?.refresh(id);
         if (this.lootPanel) this.lootPanel.active = false;
         if (id === 'equip') this.rebuildEquipList();
         if (id === 'beasts') this.refreshBeastPage();
+        if (id === 'role') this.rolePage?.refresh(this.model);
         this.refreshAll();
     }
 
@@ -1026,44 +1177,20 @@ export class MainGame extends Component {
     }
 
     private refreshCombatHud() {
-        const m = this.model;
-        if (this.lblHeroHp) this.lblHeroHp.string = `HP ${m.playerHp}/${m.playerMaxHp}`;
-        if (this.lblMonHp) this.lblMonHp.string = `HP ${m.monsterHp}/${m.monsterMaxHp}`;
-        if (this.lblMonName) this.lblMonName.string = '野怪×' + Math.max(1, this.wildMobs.length);
-        if (this.lblChat && m.lastLog) this.lblChat.string = `[战斗] ${m.lastLog}`;
+        const wild = this.wildMobs.filter((m) => m?.isValid && m.active).length;
+        this.combatHud?.refresh(this.model, Math.max(1, wild));
+        this.syncWorldHpBars();
     }
 
     private refreshAll() {
         const m = this.model;
-        const s = m.save;
-        if (this.lblGold) this.lblGold.string = `金 ${m.fmtGold(s.gold)}`;
-        if (this.lblLing) this.lblLing.string = `灵石 ${s.lingshi}`;
-        if (this.lblJade) this.lblJade.string = `仙玉 ${s.xianyu}`;
-        if (this.lblName) this.lblName.string = s.playerName;
-        if (this.lblPower) this.lblPower.string = `战力 ${m.combatPower}`;
-        if (this.lblTopPower) this.lblTopPower.string = `战力 ${m.combatPower}`;
-        if (this.lblRealm) this.lblRealm.string = `${m.realmText} ${s.realmLayer}级`;
-        if (this.lblStage) this.lblStage.string = m.stageTitle;
-        if (this.lblStageProg) this.lblStageProg.string = `${s.killsInStage}/${s.killsNeeded}`;
-        if (this.barStageFill) {
-            const ratio = s.killsNeeded ? s.killsInStage / s.killsNeeded : 0;
-            this.setFillWidth(this.barStageFill, 412, ratio, C.gold);
-            this.barStageFill.setPosition(-210 + (412 * ratio) / 2, 0, 0);
-        }
-        if (this.lblAuto) this.lblAuto.string = s.autoBattle ? '自动开' : '自动关';
-        if (this.lblBreak) {
-            const need = m.nextBreakthroughNeed();
-            this.lblBreak.string = `境界突破至${m.realmText} (${s.realmExp}/${need})`;
-        }
-        if (this.lblBreakCost) this.lblBreakCost.string = `灵石${m.nextBreakthroughCost()}`;
-        if (this.barBreakFill) {
-            const ratio = m.breakthroughProgress();
-            this.setFillWidth(this.barBreakFill, 320, ratio, C.ok);
-            this.barBreakFill.setPosition(-40 - 160 + (320 * ratio) / 2, 0, 0);
-        }
-        if (this.lblEquipPower) {
-            this.lblEquipPower.string = `战力 ${m.combatPower}`;
-        }
+        this.hudTop?.refresh(m);
+        this.stageQuest?.refresh(m);
+        this.actionDock?.refresh(m, this.skillCd);
+        if (this.lblRealm) this.lblRealm.string = m.realmText;
+        if (this.sideEquipDot) this.sideEquipDot.active = m.hasBetterEquip();
+        if (this.breakthroughOverlay?.active) this.refreshBreakthroughOverlay();
+        if (this.lblEquipPower) this.lblEquipPower.string = `战力 ${m.combatPower}`;
         (Object.keys(SLOT_LABELS) as EquipSlot[]).forEach((slot) => {
             const lb = this.slotLabels[slot];
             if (!lb) return;
@@ -1071,7 +1198,8 @@ export class MainGame extends Component {
             lb.string = it ? `${SLOT_LABELS[slot]}\n${it.name}` : SLOT_LABELS[slot];
         });
         this.refreshCombatHud();
-        this.refreshTabs();
+        this.tabBarView?.refresh(this.tab);
+        if (this.rolePage?.root?.active) this.rolePage.refresh(m);
         if (this.equipRoot.active) this.rebuildEquipList();
     }
 }
