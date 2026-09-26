@@ -1,6 +1,7 @@
 export type TabId = 'role' | 'equip' | 'spells' | 'beasts' | 'play' | 'cave' | 'alliance';
 
-export const TAB_ORDER: TabId[] = ['role', 'equip', 'spells', 'beasts', 'play', 'cave', 'alliance'];
+/** 母版的主玩法入口固定在第 4 个正中央。 */
+export const TAB_ORDER: TabId[] = ['role', 'equip', 'spells', 'play', 'beasts', 'cave', 'alliance'];
 
 export const TAB_META: Record<TabId, { label: string; icon: string; enabled: boolean }> = {
     role: { label: '角色', icon: 'textures/ui/product/tab_role', enabled: true },

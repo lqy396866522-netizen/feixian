@@ -59,6 +59,8 @@ export class MenuOverlayView {
 
     open(model: GameModel) {
         this.root.active = true;
+        // 顶栏/Tab  sibling 900/901，菜单需压在其上（toast 999 仍最顶）
+        this.root.setSiblingIndex(990);
         this.refreshSfx(model.sfxEnabled);
     }
 

@@ -22,7 +22,7 @@ import { WorldChatBarView } from './ui/WorldChatBarView';
 import { RolePageView } from './ui/RolePageView';
 import { AlliancePageView } from './ui/AlliancePageView';
 import { PL } from './ui/ProductLayout';
-import { framePixelSize, sizeContain } from './ui/SpriteLayout';
+import { framePixelSize, sizeContain, uiFullWidth, uiHalfHeight } from './ui/SpriteLayout';
 const { ccclass } = _decorator;
 
 const UI_2D = 33554432;
@@ -37,12 +37,13 @@ const WORLD_W = WORLD_TILE_W * WORLD_COLS;
 const WORLD_H = WORLD_TILE_H * WORLD_ROWS;
 const WORLD_HALF_W = WORLD_W / 2;
 const WORLD_HALF_H = WORLD_H / 2;
+/** 使用已裁切的 v2 精灵后，以“有效主体高度”而非原始 PNG 画布决定比例。 */
 const HERO_W = 172;
 const HERO_H = 196;
-const MOB_BIRD_W = 104;
-const MOB_BIRD_H = 98;
-const MOB_TURTLE_W = 124;
-const MOB_TURTLE_H = 104;
+const MOB_BIRD_W = 102;
+const MOB_BIRD_H = 112;
+const MOB_TURTLE_W = 108;
+const MOB_TURTLE_H = 108;
 const AUTO_ATTACK_RANGE = 210;
 
 const EQUIP_ICON: Record<string, string> = {
@@ -103,11 +104,6 @@ export class MainGame extends Component {
     private lblMonName!: Label;
     private lblFloat!: Label;
     private lblChat!: Label;
-    private lblAuto!: Label;
-    private lblBreak!: Label;
-    private lblBreakCost!: Label;
-    private barStageFill!: Node;
-    private barBreakFill!: Node;
     private playRoot!: Node;
     private equipRoot!: Node;
     private spellsRoot!: Node;
@@ -188,6 +184,8 @@ export class MainGame extends Component {
             this.model.chestReady = true;
         }
         this.buildUI();
+        this.relayoutChrome();
+        view.on('canvas-resize', this.relayoutChrome, this);
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
         this.preloadFxAssets();
@@ -196,9 +194,26 @@ export class MainGame extends Component {
     }
 
     onDestroy() {
+        view.off('canvas-resize', this.relayoutChrome, this);
         input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
         this.model && this.model.persist();
+    }
+
+    /** 画布尺寸变化后重锚定贴边 UI：顶栏贴顶、聊天/Tab 贴底、底色铺满可见区 */
+    private relayoutChrome() {
+        if (!this.root?.isValid) return;
+        const hh = uiHalfHeight();
+        const rootUi = this.root.getComponent(UITransform);
+        if (rootUi) {
+            rootUi.setContentSize(uiFullWidth(), hh * 2);
+            this.fill(this.root, C.sky, 0);
+        }
+        if (this.hudTop?.refs?.root?.isValid) this.hudTop.refs.root.setPosition(0, hh - PL.hudH / 2 + PL.hudOffsetY, 0);
+        if (this.tabBarView?.barRoot?.isValid) this.tabBarView.barRoot.setPosition(0, -hh + PL.tabBarH / 2, 0);
+        if (this.chatBar?.root?.isValid) {
+            this.chatBar.root.setPosition(0, -hh + PL.tabBarH + PL.chatH / 2 + 10, 0);
+        }
     }
 
     update(dt: number) {
@@ -325,6 +340,7 @@ export class MainGame extends Component {
         if (!this.grayToast) return;
         this.grayToast.string = msg;
         this.grayToast.node.active = true;
+        this.grayToast.node.setSiblingIndex(999);
         this.toastTimer = 1.4;
     }
 
@@ -394,7 +410,8 @@ export class MainGame extends Component {
         const canvasUi = this.node.getComponent(UITransform);
         if (canvasUi) canvasUi.setContentSize(DESIGN_W, DESIGN_H);
 
-        this.root = this.mk('Root', this.node, DESIGN_W, DESIGN_H, 0, 0);
+        // SHOW_ALL 下竖屏可能有上下额外线盒，根底色铺满可见区避免露黑边
+        this.root = this.mk('Root', this.node, uiFullWidth(), uiHalfHeight() * 2, 0, 0);
         this.fill(this.root, C.sky, 0);
 
         this.playRoot = this.mk('PlayRoot', this.root, DESIGN_W, DESIGN_H, 0, 0);
@@ -427,7 +444,12 @@ export class MainGame extends Component {
     }
 
     private buildProductShell() {
-        this.sideRails = new SideRailsView(this.uf, this.layerHud, (m) => this.showToast(m));
+        this.sideRails = new SideRailsView(this.uf, this.layerHud, (m) => this.showToast(m), {
+            onCity: () => this.showToast('主城未开放'),
+            onWorldMap: () => this.showToast('世界地图未开放'),
+            onRealm: () => this.openBreakthroughOverlay(),
+            onAuto: () => { this.model.toggleAuto(); this.refreshAll(); },
+        });
         this.sideRails.build();
         this.stageQuest = new StageQuestView(this.uf, this.layerHud);
         this.stageQuest.build();
@@ -441,18 +463,12 @@ export class MainGame extends Component {
         this.actionDock = new ActionDockView(
             this.uf,
             this.layerHud,
-            () => { this.model.toggleAuto(); this.refreshAll(); },
-            () => this.openBreakthroughOverlay(),
-            () => this.openBreakthroughOverlay(),
             (t) => this.showToast(t),
         );
         this.actionDock.build();
-        this.lblAuto = this.actionDock.lblAuto;
-        this.lblBreak = this.actionDock.lblBreak;
-        this.lblBreakCost = this.actionDock.lblBreakCost;
-        this.barBreakFill = this.actionDock.barBreakFill;
         this.chatBar = new WorldChatBarView(this.uf, this.root);
         this.chatBar.build();
+        this.chatBar.root.setSiblingIndex(899);
         this.lblChat = this.chatBar.lbl;
         this.menuOverlay = new MenuOverlayView(this.uf, this.root);
         this.menuOverlay.build(
@@ -569,12 +585,10 @@ export class MainGame extends Component {
         const hx = this.heroNode ? this.heroNode.position.x : 0;
         const baseX = hx + 40 + (Math.random() - 0.5) * 80;
         const baseY = this.heroBaseY + 20 + Math.random() * 40;
-        this.spawnOneDrop(baseX, baseY, 'textures/fx/drop_gold_v3', '+' + loot.gold + '金', C.goldLt, true);
+        // 常规掉落仅以轻量提示表现，避免金币堆叠遮住角色和目标；装备掉落仍保留实体反馈。
+        this.pulseGoldBar();
         if (loot.equip) {
             this.spawnOneDrop(baseX + 56, baseY + 8, 'textures/fx/drop_equip', loot.equip.name, C.cyan);
-        }
-        if (loot.lingshi) {
-            this.spawnOneDrop(baseX - 56, baseY + 6, 'textures/fx/drop_gold_v3', '+' + loot.lingshi + '石', C.cyan);
         }
     }
 
@@ -707,8 +721,7 @@ export class MainGame extends Component {
             this.root,
             () => this.menuOverlay.open(this.model),
             () => this.showToast('商城未开放'),
-            () => this.showToast('世界地图未开放'),
-            () => this.showToast('主城未开放'),
+            () => this.showToast('战力排行未开放'),
         );
         const refs = this.hudTop.build();
         this.lblGold = refs.lblGold;
@@ -837,10 +850,11 @@ export class MainGame extends Component {
 
         this.buildWorldTiles(this.layerBg);
 
+        // P4：只压低地图背景的亮度/饱和感。该层位于地图之上、角色之下，
+        // 因而不会让角色、怪物、HP 条或特效一起变暗。
         const field = this.mk('Field', this.layerDecor, WORLD_W, WORLD_H, 0, 0);
         this.fieldNode = field;
-        const fg = field.getComponent(Graphics);
-        if (fg) fg.enabled = false;
+        this.fill(field, new Color(14, 38, 24, 64), 0);
 
         this.groundDropRoot = this.mk('drops', this.layerFx, WORLD_W, WORLD_H, 0, 0);
         const dg = this.groundDropRoot.getComponent(Graphics);
@@ -851,19 +865,18 @@ export class MainGame extends Component {
         this.wildMobs = [];
         this.wildMobBaseY = [];
         const hx = 0;
+        // 保持野怪之间至少一个主体宽度：战斗画面读起来是“主角对阵怪群”，而非贴在一起的蓝色块。
         const mobSpots: [number, number][] = [
-            [hx + 92, heroY + 10],
-            [hx + 138, heroY + 28],
-            [hx + 178, heroY - 2],
-            [hx + 112, heroY + 42],
-            [hx + 158, heroY + 18],
+            [hx + 158, heroY + 66],
+            [hx + 252, heroY + 4],
+            [hx + 194, heroY - 80],
         ];
         for (let i = 0; i < mobSpots.length; i++) {
             const [mx, my] = mobSpots[i];
             const isTurtle = (i % 3) === 1;
             const w = isTurtle ? MOB_TURTLE_W : MOB_BIRD_W;
             const h = isTurtle ? MOB_TURTLE_H : MOB_BIRD_H;
-            const tex = isTurtle ? 'textures/chars/mob_turtle' : 'textures/chars/mob_bird';
+            const tex = isTurtle ? 'textures/chars/mob_turtle_v2' : 'textures/chars/mob_bird_v2';
             const mob = this.mk('wild' + i, this.layerActors, w, h, mx, my);
             mob.getComponent(UITransform)!.setAnchorPoint(0.5, 0);
             const ph = this.mk('wildPh', mob, w, h, 0, h / 2);
@@ -877,7 +890,7 @@ export class MainGame extends Component {
         this.heroNode.getComponent(UITransform)!.setAnchorPoint(0.5, 0);
         const heroPh = this.mk('heroPh', this.heroNode, HERO_W, HERO_H, 0, HERO_H / 2);
         this.circle(heroPh, C.hero);
-        this.uf.loadSprite(this.heroNode, 'textures/chars/hero_product', HERO_W, HERO_H, true, () => {
+        this.uf.loadSprite(this.heroNode, 'textures/chars/hero_v2', HERO_W, HERO_H, true, () => {
             this.loadSprite(this.heroNode, 'textures/chars/hero', HERO_W, HERO_H, true);
         });
 
@@ -1070,6 +1083,7 @@ export class MainGame extends Component {
     private buildTabBar() {
         this.tabBarView = new TabBarView(this.uf, this.root, (id) => this.setTab(id));
         this.tabBarView.build();
+        this.tabBarView.barRoot.setSiblingIndex(901);
         this.tabDots = this.tabBarView.tabDots as Record<TabId, Node>;
         this.tabLabels = this.tabBarView.tabLabels as Record<TabId, Label>;
         this.tabBarView.refresh(this.tab);
@@ -1077,40 +1091,6 @@ export class MainGame extends Component {
         if (eqTab) this.sideEquipDot = this.uf.addRedDot(eqTab, 28, 28);
     }
 
-    private paintTabDot(n: Node, selected: boolean, enabled: boolean) {
-        const ui = n.getComponent(UITransform) || n.addComponent(UITransform);
-        const d = !enabled ? 84 : (selected ? 100 : 88); // selected +4px vs prior 96
-        ui.setContentSize(d, d);
-        let g = n.getComponent(Graphics);
-        if (!g) g = n.addComponent(Graphics);
-        g.clear();
-        const r = d / 2;
-        if (!enabled) {
-            g.fillColor = C.disabledBg;
-            g.circle(0, 0, r);
-            g.fill();
-            return;
-        }
-        if (selected) {
-            g.fillColor = C.tabOn;
-            g.circle(0, 0, r);
-            g.fill();
-            g.strokeColor = new Color(46, 204, 113, 140);
-            g.lineWidth = 2;
-            g.circle(0, 0, r + 1);
-            g.stroke();
-        } else {
-            g.fillColor = new Color(26, 42, 68, 200);
-            g.circle(0, 0, r);
-            g.fill();
-            g.strokeColor = new Color(232, 244, 255, 255); // #E8F4FF
-            g.lineWidth = 2.5;
-            g.circle(0, 0, r - 1.2);
-            g.stroke();
-        }
-    }
-
-    
     private buildSpells() {
         const r = this.spellsRoot;
         this.fill(r, new Color(24, 32, 48, 240), 0);
@@ -1273,35 +1253,6 @@ export class MainGame extends Component {
         this.refreshAll();
     }
 
-    private refreshTabs() {
-        (Object.keys(this.tabDots) as TabId[]).forEach((id) => {
-            const enabled = id === 'play' || id === 'equip' || id === 'spells' || id === 'guild' || id === 'beasts';
-            const n = this.tabDots[id];
-            if (!n) return;
-            this.paintTabDot(n, id === this.tab, enabled);
-            const lb = this.tabLabels[id];
-            if (lb) {
-                lb.color = enabled ? C.goldLt : C.disabled;
-            }
-            // glyph is first Label child named lbl near top — keep white/tabGlyph via children
-            for (const ch of n.children) {
-                const lab = ch.getComponent(Label);
-                if (!lab) continue;
-                if (lab.fontSize >= 22) {
-                    lab.color = enabled ? (id === this.tab ? C.white : C.tabGlyph) : C.disabled;
-                }
-            }
-        });
-    }
-
-    private setFillWidth(node: Node, maxW: number, ratio: number, color: Color) {
-        const w = Math.max(8, maxW * Math.min(1, Math.max(0, ratio)));
-        const ui = node.getComponent(UITransform)!;
-        ui.setContentSize(w, ui.height);
-        // left-align inside parent: parent width known by caller via x
-        this.fill(node, color, 7);
-    }
-
     private refreshCombatHud() {
         const wild = this.wildMobs.filter((m) => m?.isValid && m.active).length;
         this.combatHud?.refresh(this.model, Math.max(1, wild));
@@ -1311,6 +1262,7 @@ export class MainGame extends Component {
     private refreshAll() {
         const m = this.model;
         this.hudTop?.refresh(m);
+        this.sideRails?.refresh(m);
         this.stageQuest?.refresh(m);
         this.actionDock?.refresh(m, this.skillCd);
         if (this.lblRealm) this.lblRealm.string = m.realmText;

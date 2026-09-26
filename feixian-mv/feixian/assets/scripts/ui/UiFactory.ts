@@ -56,6 +56,18 @@ export class UiFactory {
         g.stroke();
     }
 
+    /** 金边容器共用描边；作为背景 Sprite 的子节点时不会被贴图加载清除。 */
+    strokeRoundRect(n: Node, stroke: Color, lineWidth = 2, radius = 10) {
+        let g = n.getComponent(Graphics);
+        if (!g) g = n.addComponent(Graphics);
+        const ui = n.getComponent(UITransform)!;
+        g.strokeColor = stroke;
+        g.lineWidth = lineWidth;
+        const inset = lineWidth / 2;
+        g.roundRect(-ui.width / 2 + inset, -ui.height / 2 + inset, ui.width - lineWidth, ui.height - lineWidth, radius);
+        g.stroke();
+    }
+
     label(parent: Node, text: string, size: number, color: Color, x: number, y: number, w = 200, h = 40, bold = false): Label {
         const n = this.mk('lbl', parent, w, h, x, y);
         const l = n.addComponent(Label);
@@ -73,17 +85,24 @@ export class UiFactory {
         return l;
     }
 
-    click(n: Node, fn: () => void) {
+    click(n: Node, fn: () => void): Button {
         let btn = n.getComponent(Button);
         if (!btn) btn = n.addComponent(Button);
         btn.transition = Button.Transition.SCALE;
         btn.zoomScale = 0.96;
         n.on(Button.EventType.CLICK, fn, n);
         n.on(Node.EventType.TOUCH_END, fn, n);
+        return btn;
     }
 
+    /** 进度条填充：父容器内左对齐，保证从右往左增长/减少（maxW 为去除内边距后的轨道宽） */
     setFillWidth(node: Node, maxW: number, ratio: number, color: Color) {
-        const w = Math.max(8, maxW * Math.min(1, Math.max(0, ratio)));
+        const w = Math.max(4, maxW * Math.min(1, Math.max(0, ratio)));
+        const pui = node.parent?.getComponent(UITransform);
+        const pw = pui ? pui.width : maxW;
+        const inset = Math.max(0, (pw - maxW) / 2);
+        const left = -pw / 2 + inset;
+        node.setPosition(left + w / 2, node.position.y, 0);
         const ui = node.getComponent(UITransform)!;
         ui.setContentSize(w, ui.height);
         this.fill(node, color, 7);
@@ -97,8 +116,12 @@ export class UiFactory {
         return dot;
     }
 
-    tryLoadSpriteBg(node: Node, path: string, w: number, h: number, fallback: () => void) {
-        this.loadSprite(node, path, w, h, false, () => fallback(), false);
+    /**
+     * UI 美术资源默认按原始比例 contain 到布局盒中。任何需要铺满的
+     * 普通色块应使用 Graphics，而不是通过拉伸 PNG 获得。
+     */
+    tryLoadSpriteBg(node: Node, path: string, w: number, h: number, fallback: () => void, preserveAspect = true) {
+        this.loadSprite(node, path, w, h, false, () => fallback(), preserveAspect);
     }
 
     applySpriteFrame(node: Node, sf: SpriteFrame, boxW: number, boxH: number, footAnchor: boolean, preserveAspect = true) {

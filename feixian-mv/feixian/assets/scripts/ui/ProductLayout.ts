@@ -4,47 +4,60 @@ export const DESIGN_H = 1280;
 export const UI_2D = 33554432;
 export const SAFE_X = 16;
 
+/**
+ * 布局常量。顶/底贴边元素（HUD、Tab、聊天）的 Y 由各 View 按
+ * `uiHalfHeight()` 动态锚定，此处只保留相对尺寸与中部区域坐标。
+ */
 export const PL = {
-    hudH: 154,
-    hudTopY: 563,
+    /** 顶栏只放角色摘要、资源和战力，避免侵入关卡信息区。 */
+    /** HUD 皮肤原始宽高比为 3:1，720 宽时必须使用 240 高以避免拉伸。 */
+    hudH: 240,
+    /** PNG 顶部自带透明留白，整体上移后装饰刚好贴齐安全区。 */
+    hudOffsetY: 32,
 
-    cornerMapX: 278,
-    cornerMapY: 468,
-    cornerCityY: 408,
-    cornerBtn: 48,
-
-    stageTitleY: 422,
-    stageRailY: 382,
-    questBannerY: 338,
+    /** HUD 下方的连续三层：关卡名 → 进度轨 → 单一主线任务。 */
+    stageTitleY: 408,
+    stageRailY: 354,
+    questBannerY: 286,
     stageTitleW: 520,
-    stageRailW: 480,
-    questBannerW: 500,
-    questBannerH: 48,
+    stageRailW: 340,
+    questBannerW: 560,
+    questBannerH: 72,
 
-    /** 侧栏 X 由 SideRailsView 按 uiHalfWidth() 计算，此处为兜底 */
-    sideLeftX: -296,
-    sideRightX: 296,
-    sideIcon: 64,
-    sideSlotH: 92,
-    sideGap: 88,
-    sideTopY: 288,
-    chestY: -4,
+    /** 侧栏 X 由各 View 按 uiHalfWidth() 计算 */
+    /** 以 360px 实机截图为基准：图标最小显示 38px，标签最小显示 10px。 */
+    sideIcon: 92,
+    sideSlotH: 126,
+    sideGap: 118,
+    sideTopY: 218,
+    cornerBtn: 90,
+    cornerY: 432,
+    chestY: -8,
+
+    /** 左右下侧快捷功能（境界/自动、快速战斗/自动挑战） */
+    quickBtn: 94,
+    quickFightY: -214,
+    quickChallengeY: -318,
+    realmOrb: 104,
+    realmOrbY: -218,
+    autoBtn: 88,
+    autoBtnY: -326,
 
     floatY: 78,
     heroX: -88,
     heroY: -48,
-    charSize: 142,
-    mobBird: 86,
-    mobTurtle: 98,
+    charSize: 122,
+    mobBird: 112,
+    mobTurtle: 116,
 
-    actionDockY: -338,
-    actionDockW: 640,
-    actionDockH: 210,
+    /** 放在聊天条上方，保持中部战斗区完全开放。 */
+    actionDockY: -205,
+    actionDockW: 660,
+    actionDockH: 184,
 
-    chatY: -482,
-    chatW: 648,
-    chatH: 36,
+    chatW: 680,
+    chatH: 80,
 
-    tabBarY: -570,
-    tabBarH: 140,
+    /** 底栏皮肤原始宽高比为 3:1，720 宽时 240 高不变形。 */
+    tabBarH: 240,
 };
